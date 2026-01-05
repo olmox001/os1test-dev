@@ -23,6 +23,8 @@
 /* Global Kernel PGD */
 static uint64_t *kernel_pgd;
 
+#define PTE_ADDR_MASK 0x0000FFFFFFFFF000UL
+
 /*
  * Get or create next level table
  */
@@ -192,16 +194,34 @@ uint64_t *vmm_create_pgd(void) {
   if (!pgd)
     return NULL;
 
-  /* Copy kernel mappings from current TTBR0 */
-  /* This ensures the kernel remains mapped when we switch to this PGD */
-  uint64_t current_ttbr0;
-  __asm__ __volatile__("mrs %0, ttbr0_el1" : "=r"(current_ttbr0));
+  /* Zero out new PGD */
+  memset(pgd, 0, 4096);
 
-  /* Mask out ASID (top 16 bits often reserved/used for ASID) if any */
-  /* Assuming physical address is valid pointer (identity map) */
-  uint64_t *src_pgd = (uint64_t *)(current_ttbr0 & 0x0000FFFFFFFFF000UL);
+  /* We must provide the kernel identity map to the new process.
+   * Our identity map is in PGD index 0.
+   * To avoid sharing the entire 512GB branch with user space,
+   * we allocate a PRIVATE PUD for index 0 and clone only the kernel's entries.
+   */
+  uint64_t *src_pud = (uint64_t *)(kernel_pgd[0] & PTE_ADDR_MASK);
+  if (src_pud) {
+    uint64_t *dst_pud = (uint64_t *)pmm_alloc_page();
+    if (dst_pud) {
+      memset(dst_pud, 0, 4096);
+      /* Clone ONLY kernel PUD entries:
+       * Index 0: MMIO (0x0 to 0x3FFFFFFF approx)
+       * Index 1: RAM (0x40000000 to 0x7FFFFFFF)
+       * User Space starts at 0x80000000 (Index 2) - which we leave EMPTY here.
+       */
+      dst_pud[0] = src_pud[0];
+      dst_pud[1] = src_pud[1];
+      pgd[0] = (uint64_t)dst_pud | (kernel_pgd[0] & ~PTE_ADDR_MASK);
+    }
+  }
 
-  memcpy(pgd, src_pgd, 4096);
+  /* Also copy other PGD entries if any (usually none for now) */
+  for (int i = 1; i < 512; i++) {
+    pgd[i] = kernel_pgd[i];
+  }
 
   return pgd;
 }

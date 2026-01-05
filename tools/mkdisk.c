@@ -424,6 +424,7 @@ void write_ext4_partition(FILE *f, uint64_t start_lba, uint64_t size_sectors) {
   write_file_to_inode(f, start_offset, 11, "build/init.elf");
   write_file_to_inode(f, start_offset, 12, "build/counter.elf");
   write_file_to_inode(f, start_offset, 13, "build/shell.elf");
+  write_file_to_inode(f, start_offset, 14, "build/demo3d.elf");
 
   printf("Ext4: Filesystem created.\n");
 }

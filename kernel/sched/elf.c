@@ -114,8 +114,8 @@ int process_load_elf(struct process *proc, const char *path) {
     }
   }
 
-  /* 4. Setup Stack (1MB at 0x90000000) */
-  uint64_t stack_base = 0x90000000;
+  /* 4. Setup Stack (1MB at 0xC0000000) */
+  uint64_t stack_base = 0xC0000000;
   uint64_t stack_size = 0x100000; // 1MB
 
   for (uint64_t vaddr = stack_base; vaddr < stack_base + stack_size;

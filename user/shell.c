@@ -100,12 +100,13 @@ int main(void) {
   /* Start at different positions depending on some "randomness" or just fixed
    * for now */
   /* Use time as a seed-like thing for position? */
-  long t = get_time();
-  int x_off = (t % 5) * 40;
-  int y_off = (t % 3) * 40;
+  int pid = get_pid();
+  char title[32];
+  sprintf(title, "Shell PID %d", pid);
 
-  my_window =
-      create_window(100 + x_off, 100 + y_off, WIN_W, WIN_H, "Shell TTY");
+  int x_off = (pid * 40) % 200;
+  int y_off = (pid * 40) % 200;
+  my_window = create_window(100 + x_off, 100 + y_off, WIN_W, WIN_H, title);
 
   if (my_window <= 0) {
     print("[Shell] Error creating window\n");
@@ -116,7 +117,7 @@ int main(void) {
 
   print("\n[Shell] TTY Window ");
   print_hex(my_window);
-  print(" active.\n");
+  printf(" active (PID %d).\n", get_pid());
   print("\033[32mshell\033[0m> ");
 
   char buf[2] = {0, 0};

@@ -116,6 +116,6 @@ void compositor_move_window(int window_id, int x, int y);
 void compositor_handle_click(int button, int state);
 void compositor_render(void);
 void compositor_draw_rect(int window_id, int x, int y, int w, int h,
-                          uint32_t color);
+                          uint32_t color, int caller_pid);
 
 #endif /* _KERNEL_GRAPHICS_H */

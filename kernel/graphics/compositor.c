@@ -20,6 +20,7 @@ struct window {
   int z_order;
   int visible;
   int pid;
+  int protected;     /* If true, cannot be closed */
   uint32_t *buffer;  /* Window's pixel buffer */
   uint32_t bg_color; /* Background color */
   char title[64];
@@ -40,12 +41,16 @@ static int next_window_id = 1;
 /* Mouse State */
 static int mouse_x = 400;
 static int mouse_y = 300;
-// static uint32_t mouse_color = COLOR_WHITE;
+// static uint32_t mouse_color = 0xFFFFFFFF;
 
 /* Dragging State */
 static int dragging_window_id = -1;
 static int drag_off_x = 0;
 static int drag_off_y = 0;
+
+/* Title bar dimensions */
+#define TITLE_BAR_HEIGHT 20
+#define CLOSE_BUTTON_SIZE 16
 
 /*
  * Initialize Compositor
@@ -60,10 +65,15 @@ void compositor_init(void) {
 /*
  * Create Window
  */
+extern void local_irq_enable(void);
+extern void local_irq_disable(void);
+
 int compositor_create_window(int x, int y, int w, int h, const char *title,
                              int pid) {
+  local_irq_disable();
   if (window_count >= MAX_WINDOWS) {
     pr_err("Compositor: Max windows reached\n");
+    local_irq_enable();
     return -1;
   }
 
@@ -121,11 +131,14 @@ int compositor_create_window(int x, int y, int w, int h, const char *title,
     buffer[i] = windows[slot].bg_color;
   }
 
+  /* Mark main shell (PID 2) as protected */
+  windows[slot].protected = (pid == 2) ? 1 : 0;
+
   window_count++;
 
   pr_info("Compositor: Created window '%s' (%dx%d) at (%d,%d)\n", title, w, h,
           x, y);
-
+  local_irq_enable();
   return windows[slot].id;
 }
 
@@ -161,17 +174,36 @@ uint32_t *compositor_get_buffer(int window_id) {
  * Find window by PID
  */
 int compositor_get_window_by_pid(int pid) {
-  // pr_info("Compositor: Looking for window for PID %d\n", pid);
+  local_irq_disable();
   for (int i = 0; i < MAX_WINDOWS; i++) {
-    if (windows[i].id != 0) {
-      // pr_info("  WinID=%d PID=%d\n", windows[i].id, windows[i].pid);
-      if (windows[i].pid == pid) {
-        // pr_info("  FOUND!\n");
-        return windows[i].id;
+    if (windows[i].id != 0 && windows[i].pid == pid) {
+      int id = windows[i].id;
+      local_irq_enable();
+      return id;
+    }
+  }
+  local_irq_enable();
+  return -1;
+}
+
+/*
+ * Get PID of the focused window (top-most Z-order)
+ */
+int compositor_get_focus_pid(void) {
+  local_irq_disable();
+  int max_z = -1;
+  int pid = -1;
+
+  for (int i = 0; i < MAX_WINDOWS; i++) {
+    if (windows[i].id != 0 && windows[i].visible) {
+      if (windows[i].z_order > max_z) {
+        max_z = windows[i].z_order;
+        pid = windows[i].pid;
       }
     }
   }
-  return -1;
+  local_irq_enable();
+  return pid;
 }
 
 /*
@@ -268,6 +300,35 @@ static void draw_window_decorations(struct window *win) {
         ctx->buffer[py2 * ctx->width + px] = border_color;
     }
   }
+
+  /* Draw close button [X] if not protected */
+  if (!win->protected) {
+    int btn_x = win->x + win->width - CLOSE_BUTTON_SIZE - 2;
+    int btn_y = win->y - title_height + 2;
+    /* Button background */
+    for (int by = 0; by < CLOSE_BUTTON_SIZE; by++) {
+      for (int bx = 0; bx < CLOSE_BUTTON_SIZE; bx++) {
+        int px = btn_x + bx;
+        int py = btn_y + by;
+        if (px >= 0 && px < (int)ctx->width && py >= 0 &&
+            py < (int)ctx->height) {
+          ctx->buffer[py * ctx->width + px] = 0xFFCC4444; /* Red background */
+        }
+      }
+    }
+    /* Draw X */
+    for (int d = 2; d < CLOSE_BUTTON_SIZE - 2; d++) {
+      int px1 = btn_x + d;
+      int py1 = btn_y + d;
+      int px2 = btn_x + CLOSE_BUTTON_SIZE - 1 - d;
+      if (px1 >= 0 && px1 < (int)ctx->width && py1 >= 0 &&
+          py1 < (int)ctx->height)
+        ctx->buffer[py1 * ctx->width + px1] = 0xFFFFFFFF;
+      if (px2 >= 0 && px2 < (int)ctx->width && py1 >= 0 &&
+          py1 < (int)ctx->height)
+        ctx->buffer[py1 * ctx->width + px2] = 0xFFFFFFFF;
+    }
+  }
 }
 
 /*
@@ -313,6 +374,8 @@ void compositor_window_write(int win_id, const char *buf, size_t count) {
   if (!win || !win->buffer)
     return;
 
+  local_irq_disable();
+
   int char_w = 8;
   int char_h = 16;
   int cols = win->width / char_w;
@@ -347,7 +410,7 @@ void compositor_window_write(int win_id, const char *buf, size_t count) {
         /* Clear char background */
         compositor_draw_rect(win_id, win->cursor_x * char_w,
                              win->cursor_y * char_h, char_w, char_h,
-                             win->bg_color);
+                             win->bg_color, win->pid);
 
         graphics_draw_char(win->cursor_x * char_w, win->cursor_y * char_h, c,
                            win->fg_color);
@@ -405,6 +468,7 @@ void compositor_window_write(int win_id, const char *buf, size_t count) {
 
   /* Force compositor to refresh */
   compositor_render();
+  local_irq_enable();
 }
 
 /*
@@ -412,12 +476,7 @@ void compositor_window_write(int win_id, const char *buf, size_t count) {
  */
 
 static void draw_mouse_cursor(struct graphics_context *ctx) {
-  /* Definiamo la forma del cursore in stile "Apple/Modern OS".
-     Legenda:
-     ' ' = Trasparente
-     'X' = Bordo Bianco (Outline) - Per visibilità su scuro
-     '.' = Riempimento Nero (Fill) - Colore principale
-  */
+  /* Definiamo la forma del cursore in stile "Apple/Modern OS". */
   static const char *cursor_shape[] = {
       "X           ", "XX          ", "X.X         ", "X..X        ",
       "X...X       ", "X....X      ", "X.....X     ", "X......X    ",
@@ -474,15 +533,16 @@ void compositor_handle_click(int button, int state) {
   /* Debug click */
   /* pr_info("Click: %d, %d\n", mouse_x, mouse_y); */
 
-  /* Check for window hit (front to back in z-order) */
+  /* Check for window hit - include title bar area (y - TITLE_BAR_HEIGHT to y +
+   * height) */
   struct window *hit = NULL;
   int max_z = -1;
 
   for (int i = 0; i < MAX_WINDOWS; i++) {
     if (windows[i].id != 0 && windows[i].visible) {
+      int title_top = windows[i].y - TITLE_BAR_HEIGHT;
       if (mouse_x >= windows[i].x &&
-          mouse_x < windows[i].x + windows[i].width &&
-          mouse_y >= windows[i].y &&
+          mouse_x < windows[i].x + windows[i].width && mouse_y >= title_top &&
           mouse_y < windows[i].y + windows[i].height) {
         if (windows[i].z_order > max_z) {
           max_z = windows[i].z_order;
@@ -501,8 +561,24 @@ void compositor_handle_click(int button, int state) {
     }
     hit->z_order = top_z + 1;
 
-    /* Check for drag start (Title bar area, approx top 20 pixels) */
-    if (mouse_y < hit->y + 20) {
+    /* Check for close button click */
+    if (!hit->protected) {
+      int btn_x = hit->x + hit->width - CLOSE_BUTTON_SIZE - 2;
+      int btn_y = hit->y - TITLE_BAR_HEIGHT + 2;
+      if (mouse_x >= btn_x && mouse_x < btn_x + CLOSE_BUTTON_SIZE &&
+          mouse_y >= btn_y && mouse_y < btn_y + CLOSE_BUTTON_SIZE) {
+        pr_info("Compositor: Close button clicked on window %d (PID %d)\n",
+                hit->id, hit->pid);
+        /* TODO: Send kill signal to process hit->pid */
+        /* For now, just destroy the window */
+        compositor_destroy_window(hit->id);
+        compositor_render();
+        return;
+      }
+    }
+
+    /* Check for drag start (Title bar area) */
+    if (mouse_y >= hit->y - TITLE_BAR_HEIGHT && mouse_y < hit->y) {
       dragging_window_id = hit->id;
       drag_off_x = mouse_x - hit->x;
       drag_off_y = mouse_y - hit->y;
@@ -540,10 +616,9 @@ void compositor_update_mouse(int dx, int dy, int absolute) {
         break;
       }
     }
+    /* Force refresh during drag */
+    compositor_render();
   }
-
-  /* pr_info("Mouse update: dx=%d, dy=%d -> (%d, %d)\n", dx, dy, mouse_x,
-   * mouse_y); */
 
   /* Clamp to screen */
   if (mouse_x < 0)
@@ -631,9 +706,20 @@ void compositor_render(void) {
  * Draw to Window
  */
 void compositor_draw_rect(int window_id, int x, int y, int w, int h,
-                          uint32_t color) {
+                          uint32_t color, int caller_pid) {
+  local_irq_disable();
   for (int i = 0; i < MAX_WINDOWS; i++) {
     if (windows[i].id == window_id && windows[i].buffer) {
+      /* Process Isolation: Verify Ownership */
+      if (windows[i].pid != caller_pid &&
+          caller_pid != 1) { /* PID 1 is root/init */
+        pr_warn(
+            "Compositor: Process %d tried to draw to window %d (owned by %d)\n",
+            caller_pid, window_id, windows[i].pid);
+        local_irq_enable();
+        return;
+      }
+
       for (int dy = 0; dy < h; dy++) {
         for (int dx = 0; dx < w; dx++) {
           int px = x + dx;
@@ -644,7 +730,9 @@ void compositor_draw_rect(int window_id, int x, int y, int w, int h,
           }
         }
       }
+      local_irq_enable();
       return;
     }
   }
+  local_irq_enable();
 }

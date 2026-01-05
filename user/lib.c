@@ -1,5 +1,12 @@
 #include "lib.h"
 
+size_t strlen(const char *s) {
+  size_t len = 0;
+  while (*s++)
+    len++;
+  return len;
+}
+
 long read(int fd, char *buf, unsigned long count) {
   long ret;
   __asm__ __volatile__("mov x8, %1\n"
@@ -36,6 +43,17 @@ long get_time(void) {
                        : "r"((long)SYS_GET_TIME)
                        : "x0", "x8", "memory");
   return ret;
+}
+
+int get_pid(void) {
+  long ret;
+  __asm__ __volatile__("mov x8, %1\n"
+                       "svc #0\n"
+                       "mov %0, x0\n"
+                       : "=r"(ret)
+                       : "r"((long)SYS_GETPID)
+                       : "x0", "x8", "memory");
+  return (int)ret;
 }
 
 void exit(int status) {
@@ -132,28 +150,24 @@ void print_hex(unsigned long val) {
   write(1, buf, 18);
 }
 
-void printf(const char *fmt, ...) {
-  char buf[256];
-  int buf_idx = 0;
-
-  __builtin_va_list args;
-  __builtin_va_start(args, fmt);
+void vsprintf(char *out, const char *fmt, __builtin_va_list args) {
+  int out_idx = 0;
 
   for (const char *p = fmt; *p; p++) {
     if (*p == '%' && *(p + 1)) {
       p++;
       if (*p == 's') {
         const char *s = __builtin_va_arg(args, const char *);
-        while (*s && buf_idx < 255)
-          buf[buf_idx++] = *s++;
+        while (*s)
+          out[out_idx++] = *s++;
       } else if (*p == 'd') {
         int d = __builtin_va_arg(args, int);
         if (d < 0) {
-          buf[buf_idx++] = '-';
+          out[out_idx++] = '-';
           d = -d;
         }
         if (d == 0) {
-          buf[buf_idx++] = '0';
+          out[out_idx++] = '0';
         } else {
           char tmp[12];
           int ti = 0;
@@ -162,12 +176,12 @@ void printf(const char *fmt, ...) {
             d /= 10;
           }
           while (ti > 0)
-            buf[buf_idx++] = tmp[--ti];
+            out[out_idx++] = tmp[--ti];
         }
       } else if (*p == 'x') {
         unsigned long x = __builtin_va_arg(args, unsigned long);
         if (x == 0) {
-          buf[buf_idx++] = '0';
+          out[out_idx++] = '0';
         } else {
           char tmp[16];
           int ti = 0;
@@ -177,25 +191,32 @@ void printf(const char *fmt, ...) {
             x /= 16;
           }
           while (ti > 0)
-            buf[buf_idx++] = tmp[--ti];
+            out[out_idx++] = tmp[--ti];
         }
       } else {
-        buf[buf_idx++] = '%';
-        buf[buf_idx++] = *p;
+        out[out_idx++] = '%';
+        out[out_idx++] = *p;
       }
     } else {
-      buf[buf_idx++] = *p;
-    }
-
-    if (buf_idx >= 254) {
-      write(1, buf, buf_idx);
-      buf_idx = 0;
+      out[out_idx++] = *p;
     }
   }
+  out[out_idx] = '\0';
+}
 
-  if (buf_idx > 0)
-    write(1, buf, buf_idx);
+void printf(const char *fmt, ...) {
+  char buf[256];
+  __builtin_va_list args;
+  __builtin_va_start(args, fmt);
+  vsprintf(buf, fmt, args);
+  __builtin_va_end(args);
+  write(1, buf, strlen(buf));
+}
 
+void sprintf(char *out, const char *fmt, ...) {
+  __builtin_va_list args;
+  __builtin_va_start(args, fmt);
+  vsprintf(out, fmt, args);
   __builtin_va_end(args);
 }
 

@@ -175,7 +175,7 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 # Userland
 # ==============================================================================
 
-user: $(USER_ELF) $(BUILD_DIR)/counter.elf $(BUILD_DIR)/shell.elf
+user: $(USER_ELF) $(BUILD_DIR)/counter.elf $(BUILD_DIR)/shell.elf $(BUILD_DIR)/demo3d.elf
 
 # User Init
 USER_SRC = user/init.c user/lib.c
@@ -189,21 +189,29 @@ COUNTER_OBJ = $(COUNTER_SRC:%.c=$(BUILD_DIR)/%.o)
 SHELL_SRC = user/shell.c user/lib.c
 SHELL_OBJ = $(SHELL_SRC:%.c=$(BUILD_DIR)/%.o)
 
+# User Demo3D
+DEMO3D_SRC = user/demo3d.c user/lib.c
+DEMO3D_OBJ = $(DEMO3D_SRC:%.c=$(BUILD_DIR)/%.o)
+
 $(BUILD_DIR)/user/%.o: user/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(USER_ELF): $(USER_OBJ)
-	$(CC) $(CFLAGS) -Ttext=0x80000000 -e main -o $@ $^
+	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e main -o $@ $^
 	@echo "Userland init size: $$(stat -f%z $@ 2>/dev/null || stat -c%s $@ 2>/dev/null) bytes"
 
 $(BUILD_DIR)/counter.elf: $(COUNTER_OBJ)
-	$(CC) $(CFLAGS) -Ttext=0x80000000 -e main -o $@ $^
+	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e main -o $@ $^
 	@echo "Userland counter size: $$(stat -f%z $@ 2>/dev/null || stat -c%s $@ 2>/dev/null) bytes"
 
 $(BUILD_DIR)/shell.elf: $(SHELL_OBJ)
-	$(CC) $(CFLAGS) -Ttext=0x80000000 -e main -o $@ $^
+	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e main -o $@ $^
 	@echo "Userland shell size: $$(stat -f%z $@ 2>/dev/null || stat -c%s $@ 2>/dev/null) bytes"
+
+$(BUILD_DIR)/demo3d.elf: $(DEMO3D_OBJ)
+	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e main -o $@ $^
+	@echo "Userland demo3d size: $$(stat -f%z $@ 2>/dev/null || stat -c%s $@ 2>/dev/null) bytes"
 
 
 

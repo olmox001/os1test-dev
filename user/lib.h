@@ -14,6 +14,7 @@
 #define SYS_WRITE 64
 #define SYS_EXIT 93
 #define SYS_GET_TIME 169
+#define SYS_GETPID 172
 #define SYS_DRAW 200
 #define SYS_FLUSH 201
 #define SYS_CREATE_WINDOW 210
@@ -24,6 +25,7 @@
 long read(int fd, char *buf, unsigned long count);
 void write(int fd, const char *buf, size_t count);
 long get_time(void);
+int get_pid(void);
 void exit(int status);
 
 /* Graphics syscalls (direct framebuffer) */
@@ -39,6 +41,8 @@ void compositor_render(void);
 void print(const char *s);
 void print_hex(unsigned long val);
 void printf(const char *fmt, ...);
+void sprintf(char *out, const char *fmt, ...);
+size_t strlen(const char *s);
 
 /* Standard IO */
 int getchar(void);

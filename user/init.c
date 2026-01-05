@@ -8,7 +8,8 @@ int main(void) {
   /* Splash Screen */
   draw(0, 0, 800, 600, 0xFF1a1a2e); /* Dark Background */
 
-  print("\n[Init] System Booting...\n");
+  printf("\n[Init] System Booting (PID %d)...\n", get_pid());
+  print("[Init] Splash Screen Active.\n");
 
   /* Progress Bar */
   for (int i = 0; i < 100; i++) {
