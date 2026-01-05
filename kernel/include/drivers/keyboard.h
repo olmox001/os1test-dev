@@ -1,0 +1,26 @@
+/*
+ * kernel/include/drivers/keyboard.h
+ * Keyboard Input Subsystem
+ */
+#ifndef _DRIVERS_KEYBOARD_H
+#define _DRIVERS_KEYBOARD_H
+
+/* Initialize keyboard subsystem */
+void keyboard_init(void);
+
+/* Poll for new keyboard input */
+void keyboard_poll(void);
+
+/* Check if input is available */
+int keyboard_has_input(void);
+
+/* Read one character (non-blocking, returns -1 if none) */
+int keyboard_read_char_nonblock(void);
+
+/* Read one character (blocking) */
+char keyboard_read_char(void);
+
+/* Read a line of input (blocking, with echo) */
+int keyboard_read_line(char *buf, int max_len);
+
+#endif /* _DRIVERS_KEYBOARD_H */
