@@ -21,15 +21,35 @@ int main(void) {
       ;
   }
 
-  print("[Init] Handing over to Shell Processes\n");
+  print("[Init] Handing over to Shell Processes...\n");
+
+  /* Spawn Shells Dinamically (Second Stage) */
+  int pid1 = spawn("/shell");
+  // int pid2 = spawn("/demo3d");
+  printf("[Init] Spawning IPC Test...\n");
+  int pid2 = spawn("/ipc_send");
+
   flush();
 
-  /* Init stays alive as an idle/supervisor process */
+  /* Supervisor loop: Monitor and respawn shells if they die */
   while (1) {
-    long t = get_time();
-    if (t % 100 == 0) {
-      /* Optional: heartbeat? */
+    /* Poll Shell 1 */
+    if (wait(pid1) == pid1) {
+      print("[Init] Shell 1 (PID %d) terminated! Respawning...\n");
+      pid1 = spawn("/shell");
     }
+
+    /* Poll Shell 2 */
+    if (wait(pid2) == pid2) {
+      print("[Init] Demo3d (PID %d) terminated! Respawning...\n");
+      pid2 = spawn("/demo3d");
+    }
+
+    /* Wait a bit before next poll to avoid busy-waiting too much
+       (Though wait() is non-blocking, we don't want to hog the CPU) */
+    /* Wait a bit before next poll to avoid busy-waiting too much
+       Use yield to be cooperative! */
+    yield();
   }
 
   return 0;

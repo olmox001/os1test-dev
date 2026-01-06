@@ -60,7 +60,17 @@ static void process_command(void) {
   print("\n");
 
   if (str_eq(cmd_buf, "help") || str_eq(cmd_buf, "?")) {
-    print("\nCommands: help, clear, time, info, demo, about, exit\n");
+    print("\n\033[1;33mAvailable Commands:\033[0m\n");
+    print("  help       - Show this help\n");
+    print("  clear      - Clear screen\n");
+    print("  time       - Show uptime\n");
+    print("  demo       - Draw 2D shapes\n");
+    print("  demo3d     - Launch 3D cube demo\n");
+    print("  shell      - Open new shell window\n");
+    print("  ps         - List processes\n");
+    print("  kill <pid> - Kill process by PID\n");
+    print("  about      - About this OS\n");
+    print("  exit       - Exit shell\n");
   } else if (str_eq(cmd_buf, "clear")) {
     print("\033[2J\033[H");
     shell_redraw();
@@ -75,6 +85,46 @@ static void process_command(void) {
       window_draw(my_window, 50 + i * 100, 100, 80, 80, colors[i]);
     }
     compositor_render();
+  } else if (str_eq(cmd_buf, "demo3d")) {
+    print("Launching 3D demo...\n");
+    int pid = spawn("/demo3d");
+    if (pid > 0) {
+      printf("Started demo3d with PID %d\n", pid);
+    } else {
+      print("Failed to start demo3d\n");
+    }
+  } else if (str_eq(cmd_buf, "shell")) {
+    print("Opening new shell...\n");
+    int pid = spawn("/shell");
+    if (pid > 0) {
+      printf("Shell started. PID=%d\n", pid);
+    } else {
+      print("Failed to start shell\n");
+    }
+  } else if (str_eq(cmd_buf, "ps")) {
+    print("\n\033[1;36mRunning Processes:\033[0m\n");
+    printf("  PID 1: init\n");
+    printf("  PID 2: shell (main)\n");
+    printf("  PID %d: shell (this)\n", get_pid());
+    print("(Full process list coming soon)\n");
+  } else if (cmd_buf[0] == 'k' && cmd_buf[1] == 'i' && cmd_buf[2] == 'l' &&
+             cmd_buf[3] == 'l' && cmd_buf[4] == ' ') {
+    /* Parse PID from "kill <pid>" */
+    int pid = 0;
+    for (int i = 5; cmd_buf[i] >= '0' && cmd_buf[i] <= '9'; i++) {
+      pid = pid * 10 + (cmd_buf[i] - '0');
+    }
+    if (pid > 0) {
+      printf("Killing PID %d...\n", pid);
+      int result = kill_process(pid);
+      if (result == 0) {
+        print("Process terminated.\n");
+      } else {
+        print("Failed to kill process.\n");
+      }
+    } else {
+      print("Usage: kill <pid>\n");
+    }
   } else if (str_eq(cmd_buf, "about")) {
     print("\n\033[1;36mNeXs OS v0.0.1\033[0m\n");
     print("\033[33mGraphics:\033[0m Window Compositor + ANSI Terminal "
@@ -85,8 +135,10 @@ static void process_command(void) {
   } else if (str_eq(cmd_buf, "exit")) {
     print("Exiting shell...\n");
     running = 0;
+    exit(0);
   } else {
     printf("Unknown command: %s\n", cmd_buf);
+    print("Type 'help' for available commands.\n");
   }
 
   cmd_len = 0;
