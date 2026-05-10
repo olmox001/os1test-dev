@@ -686,10 +686,17 @@ void compositor_update_mouse(int dx, int dy, int absolute) {
  */
 #include <kernel/region.h>
 
+static int in_render = 0;
 static void compositor_render_internal(void) {
-  struct gpu_device *dev = gpu_get_primary();
-  if (!dev || !compositor_backbuffer)
+  if (in_render)
     return;
+  in_render = 1;
+
+  struct gpu_device *dev = gpu_get_primary();
+  if (!dev || !compositor_backbuffer) {
+    in_render = 0;
+    return;
+  }
 
   /* Use current buffer dimensions */
   int bb_w = bb_width;
@@ -932,6 +939,8 @@ static void compositor_render_internal(void) {
       dev->ops->flush(dev, 0, 0, bb_w, bb_h);
     }
   }
+
+  in_render = 0;
 }
 
 /*

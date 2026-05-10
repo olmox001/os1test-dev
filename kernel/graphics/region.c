@@ -6,16 +6,16 @@
 /* Simple Region Implementation (List of Rectangles) */
 
 struct region *region_create(void) {
-  struct region *reg = (struct region *)kmalloc(sizeof(struct region));
+  struct region *reg = (struct region *)kcalloc(1, sizeof(struct region));
   if (!reg)
     return NULL;
-  reg->count = 0;
-  reg->capacity = 8;
-  reg->rects = (struct rect *)kmalloc(sizeof(struct rect) * reg->capacity);
+  reg->rects = (struct rect *)kmalloc(sizeof(struct rect) * 8);
   if (!reg->rects) {
     kfree(reg);
     return NULL;
   }
+  reg->count = 0;
+  reg->capacity = 8;
   return reg;
 }
 

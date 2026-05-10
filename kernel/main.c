@@ -97,7 +97,7 @@ void kernel_main(void) {
   arch_dsb();
 
   for (int i = 1; i < 4; i++) {
-    void *stack = (void *)&__kernel_stack[(i + 1) * 65536];
+    void *stack = (void *)&__kernel_stack[(i + 1) * 131072];
     int ret = cpu_wake_secondary(i, secondary_cpu_entry, stack);
     if (ret != 0) {
       pr_err("Failed to wake CPU %d: ret=%d (0x%x)\n", i, ret, ret);

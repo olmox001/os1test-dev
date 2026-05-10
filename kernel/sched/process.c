@@ -380,6 +380,9 @@ void start_user_process(struct process *proc) {
  */
 struct pt_regs *schedule(struct pt_regs *regs) {
   struct cpu_info *cpu_ptr = get_cpu_info();
+  if (!cpu_ptr)
+    return regs;
+
   uint32_t cpu = cpu_ptr->cpu_id;
   struct process *prev = cpu_ptr->current_task;
   uint64_t flags;
@@ -398,15 +401,8 @@ struct pt_regs *schedule(struct pt_regs *regs) {
      * first_run processes have their context initialized by ELF loader
      * and should not be overwritten */
     if (!prev->first_run) {
-      /* pr_info("SCHED: Saving context for PID %d (first_run=0) - regs=%p\n",
-              prev->pid, (void *)regs);
-      pr_info("SCHED:   Before save - context=%p ELR=0x%lx SP_EL0=0x%lx\n",
-              (void *)prev->context, prev->context->elr, prev->context->sp_el0);
-    */
-      prev->context = regs; /* Save context */
-      /* pr_info("SCHED:   After save - context=%p ELR=0x%lx SP_EL0=0x%lx\n",
-              (void *)prev->context, prev->context->elr, prev->context->sp_el0);
-       */
+      if (regs)
+        prev->context = regs; /* Save context */
     } else {
       /* First time this process is being scheduled
        * CRITICAL: Only clear first_run if process was actually RUNNING
