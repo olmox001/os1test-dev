@@ -249,9 +249,27 @@ void vsnprintf(char *out, size_t size, const char *fmt,
     }
 
     int width = 0;
-    while (*p >= '0' && *p <= '9') {
-      width = width * 10 + (*p - '0');
+    int precision = -1;
+    if (*p == '.') {
       p++;
+      precision = 0;
+      while (*p >= '0' && *p <= '9') {
+        precision = precision * 10 + (*p - '0');
+        p++;
+      }
+    } else {
+      while (*p >= '0' && *p <= '9') {
+        width = width * 10 + (*p - '0');
+        p++;
+      }
+      if (*p == '.') {
+        p++;
+        precision = 0;
+        while (*p >= '0' && *p <= '9') {
+          precision = precision * 10 + (*p - '0');
+          p++;
+        }
+      }
     }
 
     int is_long = 0;
@@ -267,6 +285,8 @@ void vsnprintf(char *out, size_t size, const char *fmt,
       int len = 0;
       while (s[len])
         len++;
+      if (precision >= 0 && len > precision)
+        len = precision;
 
       if (!left) {
         while (len < width && out_idx < size - 1) {
@@ -274,8 +294,10 @@ void vsnprintf(char *out, size_t size, const char *fmt,
           len++;
         }
       }
-      while (*s && out_idx < size - 1) {
+      int i = 0;
+      while (*s && out_idx < size - 1 && (precision < 0 || i < precision)) {
         out[out_idx++] = *s++;
+        i++;
       }
       if (left) {
         while (len < width && out_idx < size - 1) {

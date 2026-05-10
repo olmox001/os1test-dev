@@ -11,6 +11,7 @@
 #include <kernel/sched.h>
 
 #include <kernel/arch.h>
+#include <kernel/vmm.h>
 
 /* CPU info array (max 8 CPUs) */
 struct cpu_info cpu_data[8];
@@ -55,7 +56,7 @@ void cpu_init(void) {
   } else {
     /* Avoid pr_info here as it might cause lock contention with primary core
      * boot logs */
-    nr_cpus++;
+    __sync_fetch_and_add(&nr_cpus, 1);
   }
 
   /* Enable FPU/SIMD (NEON) - set CPACR_EL1.FPEN = 0b11 */
@@ -113,20 +114,38 @@ struct pt_regs *sync_handler(struct pt_regs *frame) {
     pr_err("Unhandled exception EC=0x%x at 0x%016lx\n", ec, elr);
     break;
   }
-
+  
   if (ec != 0x15) {
-    /* If fault came from EL0 (User Mode), terminate process instead of panic */
-    if ((frame->spsr & 0xF) == 0) {
-      pr_err("USER FAULT: EC=0x%x (0x%lx) FAR=0x%016lx ELR=0x%016lx\n", ec, esr,
-             far, elr);
-      pr_err("Terminating PID %d\n", current_process->pid);
+    bool is_user_fault = ((frame->spsr & 0xF) == 0);
+    bool is_kernel_user_access_fault = (current_process != NULL && vmm_is_user_addr(far));
 
-      /* Optional: notify server */
-      /* ... same logic as syscall_handler ... */
+    if (is_user_fault || is_kernel_user_access_fault) {
+      pr_err("[ERROR] KERNEL-USER FAULT: EC=0x%lx (0x%lx) FAR=0x%lx ELR=0x%lx PID=%d\n",
+             (uint64_t)ec, esr, far, elr, current_process->pid);
+      pr_err("[DEBUG] Context: x0=0x%lx x1=0x%lx x2=0x%lx x3=0x%lx sp=0x%lx\n",
+             frame->regs[0], frame->regs[1], frame->regs[2], frame->regs[3],
+             frame->sp_el0);
+      pr_err("Terminating PID %d\n", current_process->pid);
+      
+      if (elr == 0) {
+        pr_err("CRITICAL: Process PID %d jumped to NULL (ELR=0).\n",
+               current_process->pid);
+      }
+
+      /* If it was a kernel-user access fault, we are holding mm_lock and have IRQs disabled!
+       * We MUST release them to avoid system deadlock.
+       */
+      if (is_kernel_user_access_fault) {
+        spin_unlock(&current_process->mm_lock);
+        local_irq_enable();
+      }
+
+      pr_err("Terminating PID %d\n", current_process->pid);
 
       process_terminate(current_process->pid);
       return schedule(frame);
     }
+
 
     pr_err("%s", "--- Kernel Exception Context Dump ---\n");
     pr_err("Process: PID %d\n",
@@ -136,6 +155,10 @@ struct pt_regs *sync_handler(struct pt_regs *frame) {
     pr_err("FAR_EL1:  0x%016lx\n", far);
     pr_err("ESR_EL1:  0x%016lx\n", esr);
     pr_err("EC: 0x%x, ISS: 0x%x\n", ec, (uint32_t)(esr & 0xFFFFFF));
+
+    if (elr == 0) {
+        pr_err("%s", "CRITICAL: Kernel jumped to NULL! Check exception vector table and function pointers.\n");
+    }
 
     for (int i = 0; i < 31; i += 2) {
       if (i + 1 < 31) {

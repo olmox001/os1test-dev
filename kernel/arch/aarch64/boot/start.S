@@ -40,13 +40,14 @@ primary_init:
     add x19, x19, :lo12:boot_info
     str x0, [x19]
     
-    adrp x0, __kernel_stack_top
-    add x0, x0, :lo12:__kernel_stack_top
+    adrp x0, __kernel_stack
+    add x0, x0, :lo12:__kernel_stack
+    add x0, x0, #131072    /* Use first 128KB slice for CPU 0 */
     mov sp, x0
     
     /* Switch to SP_EL1 */
     msr spsel, #1
-    /* Re-set SP for EL1 just in case (though mov sp above sets current SP) */
+    /* Re-set SP for EL1 just in case */
     mov sp, x0
     
     /* Check current exception level */
@@ -237,10 +238,10 @@ cpu_stacks:
 .section .bss
 .balign 16
 
-/* Per-CPU stacks (64KB each) */
+/* Per-CPU stacks (128KB each) */
 .global __kernel_stack
 __kernel_stack:
-    .skip 65536 * 8     /* 8 CPUs * 64KB */
+    .skip 131072 * 8     /* 8 CPUs * 128KB */
 .global __kernel_stack_top
 __kernel_stack_top:
 

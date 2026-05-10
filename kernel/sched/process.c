@@ -233,10 +233,10 @@ struct process *process_create(const char *name, uint8_t priority,
 
   spin_unlock_irqrestore(&sched_lock, flags);
 
+  proc->page_table = vmm_create_pgd();
+
   pr_info("process_create: '%s' PID=%d slot=%d Prio=%d TTBR0=0x%lx\n", name,
           proc->pid, slot, proc->priority, virt_to_phys(proc->page_table));
-
-  proc->page_table = vmm_create_pgd();
 
   /* Allocate and Setup Kernel Stack (16KB) */
   void *kstack_base = pmm_alloc_pages(STACK_SIZE / 4096);
@@ -341,7 +341,7 @@ int process_terminate(int pid) {
   spin_unlock_irqrestore(&sched_lock, flags);
 
   if (proc->kernel_stack) {
-    pmm_free_page((void *)(proc->kernel_stack - 4096));
+    pmm_free_pages((void *)(proc->kernel_stack - STACK_SIZE), STACK_SIZE / 4096);
   }
   if (proc->page_table) {
     vmm_destroy_pgd(proc->page_table);
@@ -380,6 +380,9 @@ void start_user_process(struct process *proc) {
  */
 struct pt_regs *schedule(struct pt_regs *regs) {
   struct cpu_info *cpu_ptr = get_cpu_info();
+  if (!cpu_ptr)
+    return regs;
+
   uint32_t cpu = cpu_ptr->cpu_id;
   struct process *prev = cpu_ptr->current_task;
   uint64_t flags;
@@ -392,61 +395,38 @@ struct pt_regs *schedule(struct pt_regs *regs) {
   extern int compositor_get_focus_pid(void);
   int focus_pid = compositor_get_focus_pid();
 
-  /* 1. Handle Current Process */
-  if (prev) {
-    /* Only save context if process has been running before
-     * first_run processes have their context initialized by ELF loader
-     * and should not be overwritten */
-    if (!prev->first_run) {
-      /* pr_info("SCHED: Saving context for PID %d (first_run=0) - regs=%p\n",
-              prev->pid, (void *)regs);
-      pr_info("SCHED:   Before save - context=%p ELR=0x%lx SP_EL0=0x%lx\n",
-              (void *)prev->context, prev->context->elr, prev->context->sp_el0);
-    */
-      prev->context = regs; /* Save context */
-      /* pr_info("SCHED:   After save - context=%p ELR=0x%lx SP_EL0=0x%lx\n",
-              (void *)prev->context, prev->context->elr, prev->context->sp_el0);
-       */
-    } else {
-      /* First time this process is being scheduled
-       * CRITICAL: Only clear first_run if process was actually RUNNING
-       * (i.e., it executed user code). If it was just READY, it never
-       * ran, so keep first_run=1 to preserve ELF context */
-      if (prev->state == PROC_RUNNING) {
-        /* pr_info("SCHED: PID %d completed first run, clearing first_run
-           flag\n", prev->pid); */
+    /* 1. Handle Current Process */
+    if (prev) {
+      /* Save current context if it was running */
+      if (regs) {
+        prev->context = regs;
+      }
+      
+      /* Clear first_run flag since it has now been scheduled and preempted/yielded */
+      if (prev->first_run) {
         prev->first_run = 0;
-      } /* else {
-        pr_info("SCHED: SKIPPING context save for PID %d (first_run=1, never "
-                "ran)\n",
-                prev->pid);
       }
-      pr_info("SCHED:   Preserving ELF context=%p ELR=0x%lx SP_EL0=0x%lx\n",
-              (void *)prev->context, prev->context->elr, prev->context->sp_el0);
-    */
-    }
 
-    if (prev->state == PROC_RUNNING) {
-      prev->time_slice--;
+      if (prev->state == PROC_RUNNING) {
+        prev->time_slice--;
 
-      if (prev->time_slice <= 0) {
-        /* Quantum Exhausted */
-        prev->time_slice = prev->quantum_reset;
-        prev->state = PROC_READY;
+        if (prev->time_slice <= 0) {
+          /* Quantum Exhausted */
+          prev->time_slice = prev->quantum_reset;
+          prev->state = PROC_READY;
+        } else {
+          /* Preempted or yielded? Mark READY to allow others */
+          prev->state = PROC_READY;
+        }
+      }
+
+      if (prev->state == PROC_READY) {
+        prev->on_cpu = -1;
+        enqueue_task(prev);
       } else {
-        /* Preempted or yielded? Mark READY to allow others of same/higher prio
-         */
-        prev->state = PROC_READY;
+        prev->on_cpu = -1;
       }
     }
-
-    if (prev->state == PROC_READY) {
-      prev->on_cpu = -1;
-      enqueue_task(prev);
-    } else {
-      prev->on_cpu = -1;
-    }
-  }
 
   /* 2. Pick Next Process (O(1) Priority-based Selection) */
   struct process *next = NULL;
@@ -594,6 +574,9 @@ int process_wait(int pid) {
           if (proc->kernel_stack) {
             pmm_free_pages((void *)(proc->kernel_stack - STACK_SIZE),
                            STACK_SIZE / 4096);
+          }
+          if (proc->page_table) {
+            vmm_destroy_pgd(proc->page_table);
           }
           pmm_free_page(proc);
         }

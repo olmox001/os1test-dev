@@ -116,6 +116,13 @@ int compositor_create_window(int x, int y, int w, int h, const char *title,
                              int pid) {
   uint64_t flags;
   spin_lock_irqsave(&compositor_lock, &flags);
+
+  if (w <= 0 || h <= 0 || w > 4096 || h > 4096) {
+    pr_err("Compositor: Invalid window dimensions %dx%d\n", w, h);
+    spin_unlock_irqrestore(&compositor_lock, flags);
+    return -1;
+  }
+
   if (window_count >= MAX_WINDOWS) {
     pr_err("%s", "Compositor: Max windows reached\n");
     spin_unlock_irqrestore(&compositor_lock, flags);
@@ -221,7 +228,8 @@ int compositor_create_window(int x, int y, int w, int h, const char *title,
  * Destroy Window
  */
 void compositor_destroy_window(int window_id) {
-  uint64_t flags = local_irq_save();
+  uint64_t flags;
+  spin_lock_irqsave(&compositor_lock, &flags);
   for (int i = 0; i < MAX_WINDOWS; i++) {
     if (windows[i].id == window_id) {
       if (windows[i].buffer) {
@@ -233,29 +241,35 @@ void compositor_destroy_window(int window_id) {
         kfree(windows[i].attr_grid);
       memset(&windows[i], 0, sizeof(struct window));
       window_count--;
-      local_irq_restore(flags);
+      spin_unlock_irqrestore(&compositor_lock, flags);
       return;
     }
   }
-  /* Fallthrough if not found */
-  local_irq_restore(flags);
+  spin_unlock_irqrestore(&compositor_lock, flags);
 }
 
 /*
  * Destroy all windows owned by a specific PID
  */
 void compositor_destroy_windows_by_pid(int pid) {
-  uint64_t flags = local_irq_save();
+  uint64_t flags;
+  spin_lock_irqsave(&compositor_lock, &flags);
   for (int i = 0; i < MAX_WINDOWS; i++) {
     if (windows[i].id != 0 && windows[i].pid == pid) {
       if (windows[i].buffer) {
         kfree(windows[i].buffer);
       }
+      if (windows[i].text_grid) {
+        kfree(windows[i].text_grid);
+      }
+      if (windows[i].attr_grid) {
+        kfree(windows[i].attr_grid);
+      }
       memset(&windows[i], 0, sizeof(struct window));
       window_count--;
     }
   }
-  local_irq_restore(flags);
+  spin_unlock_irqrestore(&compositor_lock, flags);
 }
 
 /*
@@ -274,15 +288,16 @@ uint32_t *compositor_get_buffer(int window_id) {
  * Find window by PID
  */
 int compositor_get_window_by_pid(int pid) {
-  uint64_t flags = local_irq_save();
+  uint64_t flags;
+  spin_lock_irqsave(&compositor_lock, &flags);
   for (int i = 0; i < MAX_WINDOWS; i++) {
     if (windows[i].id != 0 && windows[i].pid == pid) {
       int id = windows[i].id;
-      local_irq_restore(flags);
+      spin_unlock_irqrestore(&compositor_lock, flags);
       return id;
     }
   }
-  local_irq_restore(flags);
+  spin_unlock_irqrestore(&compositor_lock, flags);
   return -1;
 }
 
@@ -290,7 +305,10 @@ int compositor_get_window_by_pid(int pid) {
  * Get PID of the focused window (top-most Z-order)
  */
 int compositor_get_focus_pid(void) {
-  uint64_t flags = local_irq_save();
+  uint64_t flags;
+  /* Use trylock to avoid blocking in timer IRQ context */
+  if (!spin_trylock_irqsave(&compositor_lock, &flags))
+    return -1;
   int max_z = -1;
   int pid = -1;
 
@@ -302,7 +320,7 @@ int compositor_get_focus_pid(void) {
       }
     }
   }
-  local_irq_restore(flags);
+  spin_unlock_irqrestore(&compositor_lock, flags);
   return pid;
 }
 
@@ -668,10 +686,17 @@ void compositor_update_mouse(int dx, int dy, int absolute) {
  */
 #include <kernel/region.h>
 
+static volatile int in_render = 0;
 static void compositor_render_internal(void) {
-  struct gpu_device *dev = gpu_get_primary();
-  if (!dev || !compositor_backbuffer)
+  /* Atomic guard against concurrent rendering (multi-CPU or IRQ re-entrancy) */
+  if (__sync_lock_test_and_set(&in_render, 1))
     return;
+
+  struct gpu_device *dev = gpu_get_primary();
+  if (!dev || !compositor_backbuffer) {
+    __sync_lock_release(&in_render);
+    return;
+  }
 
   /* Use current buffer dimensions */
   int bb_w = bb_width;
@@ -682,7 +707,7 @@ static void compositor_render_internal(void) {
   struct gl_surface screen = {
       .width = bb_w, .height = bb_h, .stride = bb_w, .buffer = backbuffer};
 
-  /* Sort Windows by Z-Order (Bottom to Top) */
+  /* Use static buffers to avoid stack pressure/smashing */
   struct window **sorted = sorted_windows;
   struct region **visible_regions = visible_regions_store;
 
@@ -712,13 +737,20 @@ static void compositor_render_internal(void) {
   }
 
   /* Top Most handling */
-  for (int i = 0; i < count - 1; i++) {
-    for (int j = 0; j < count - i - 1; j++) {
-      if (!sorted[j]->top_most && sorted[j + 1]->top_most) {
-        struct window *tmp = sorted[j];
-        sorted[j] = sorted[j + 1];
-        sorted[j + 1] = tmp;
+  /* Top Most handling: move all top-most windows to the end of the sorted list */
+  int current_count = count;
+  for (int i = 0; i < current_count; i++) {
+    if (sorted[i]->top_most) {
+      struct window *tmp = sorted[i];
+      /* Shift remaining windows left */
+      for (int k = i; k < current_count - 1; k++) {
+        sorted[k] = sorted[k + 1];
       }
+      sorted[current_count - 1] = tmp;
+      /* Decrement current_count so we don't re-process the window we just moved */
+      current_count--;
+      /* Decrement i to process the window that was shifted into the current slot */
+      i--;
     }
   }
 
@@ -733,7 +765,8 @@ static void compositor_render_internal(void) {
   }
 
   /* Iterate Top-to-Bottom for Occlusion */
-  for (int i = count - 1; i >= 0; i--) {
+  /* Iterate Top-to-Bottom for Occlusion */
+  for (int i = count - 1; i >= 0 && i < MAX_WINDOWS; i--) {
     struct window *win = sorted[i];
 
     /* Calculate Full Window Bounds (Content + Decorations) */
@@ -790,7 +823,7 @@ static void compositor_render_internal(void) {
   region_destroy(occluded);
 
   /* Pass 2: Rendering (Bottom-Up) - Painter's Algorithm with Clipping */
-  for (int i = 0; i < count; i++) {
+  for (int i = 0; i < count && i < MAX_WINDOWS; i++) {
     struct window *win = sorted[i];
     struct region *vis = visible_regions[i];
 
@@ -884,7 +917,6 @@ static void compositor_render_internal(void) {
   }
 
   /* Mouse Cursor (Always on top) */
-  /* ... (Existing mouse code) ... */
   static const char *cursor_bits[] = {
       "X           ", "XX          ", "X.X         ", "X..X        ",
       "X...X       ", "X....X      ", "X.....X     ", "X......X    ",
@@ -914,6 +946,8 @@ static void compositor_render_internal(void) {
       dev->ops->flush(dev, 0, 0, bb_w, bb_h);
     }
   }
+
+  __sync_lock_release(&in_render);
 }
 
 /*
@@ -999,12 +1033,13 @@ void compositor_blit(int window_id, int x, int y, int w, int h,
                      const uint32_t *user_buf, int caller_pid) {
   // pr_info("BLIT: win=%d pid=%d buf=%p %dx%d\n", window_id, caller_pid,
   // user_buf, w, h);
-  uint64_t flags = local_irq_save();
+  uint64_t flags;
+  spin_lock_irqsave(&compositor_lock, &flags);
   for (int i = 0; i < MAX_WINDOWS; i++) {
     if (windows[i].id == window_id && windows[i].buffer) {
       /* Process Isolation: Verify Ownership */
       if (windows[i].pid != caller_pid && caller_pid != 1) {
-        local_irq_restore(flags);
+        spin_unlock_irqrestore(&compositor_lock, flags);
         return;
       }
 
@@ -1054,15 +1089,17 @@ void compositor_blit(int window_id, int x, int y, int w, int h,
 }
 
 void compositor_set_window_flags(int window_id, int flags_val) {
-  uint64_t flags = local_irq_save();
+  uint64_t flags;
+  spin_lock_irqsave(&compositor_lock, &flags);
   for (int i = 0; i < MAX_WINDOWS; i++) {
     if (windows[i].id == window_id) {
-      if (flags_val & 1)
-        windows[i].top_most = 1;
-      else
-        windows[i].top_most = 0;
+      windows[i].top_most = (flags_val & 1) ? 1 : 0;
+      if (flags_val & 4)
+        windows[i].visible = 0; /* bit 2: hide window */
+      else if (flags_val & 2)
+        windows[i].visible = 1; /* bit 1: show window */
       break;
     }
   }
-  local_irq_restore(flags);
+  spin_unlock_irqrestore(&compositor_lock, flags);
 }
