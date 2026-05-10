@@ -114,19 +114,18 @@ struct pt_regs *sync_handler(struct pt_regs *frame) {
     pr_err("Unhandled exception EC=0x%x at 0x%016lx\n", ec, elr);
     break;
   }
-
+  
   if (ec != 0x15) {
-    /* If fault came from EL0 (User Mode) OR it's a fault on a USER address from EL1,
-     * terminate process instead of panic.
-     * Note: We check if far is a user address. If it is, and we have a current_process,
-     * it means we likely crashed during copy_to/from_user.
-     */
     bool is_user_fault = ((frame->spsr & 0xF) == 0);
     bool is_kernel_user_access_fault = (current_process != NULL && vmm_is_user_addr(far));
 
     if (is_user_fault || is_kernel_user_access_fault) {
-      pr_err("%s FAULT: EC=0x%x (0x%lx) FAR=0x%016lx ELR=0x%016lx\n",
-             is_user_fault ? "USER" : "KERNEL-USER", ec, esr, far, elr);
+      pr_err("[ERROR] KERNEL-USER FAULT: EC=0x%lx (0x%lx) FAR=0x%lx ELR=0x%lx PID=%d\n",
+             (uint64_t)ec, esr, far, elr, current_process->pid);
+      pr_err("[DEBUG] Context: x0=0x%lx x1=0x%lx x2=0x%lx x3=0x%lx sp=0x%lx\n",
+             frame->regs[0], frame->regs[1], frame->regs[2], frame->regs[3],
+             frame->sp_el0);
+      pr_err("Terminating PID %d\n", current_process->pid);
       
       if (elr == 0) {
         pr_err("CRITICAL: Process PID %d jumped to NULL (ELR=0).\n",

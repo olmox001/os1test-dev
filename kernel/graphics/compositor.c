@@ -686,15 +686,15 @@ void compositor_update_mouse(int dx, int dy, int absolute) {
  */
 #include <kernel/region.h>
 
-static int in_render = 0;
+static volatile int in_render = 0;
 static void compositor_render_internal(void) {
-  if (in_render)
+  /* Atomic guard against concurrent rendering (multi-CPU or IRQ re-entrancy) */
+  if (__sync_lock_test_and_set(&in_render, 1))
     return;
-  in_render = 1;
 
   struct gpu_device *dev = gpu_get_primary();
   if (!dev || !compositor_backbuffer) {
-    in_render = 0;
+    __sync_lock_release(&in_render);
     return;
   }
 
@@ -707,7 +707,7 @@ static void compositor_render_internal(void) {
   struct gl_surface screen = {
       .width = bb_w, .height = bb_h, .stride = bb_w, .buffer = backbuffer};
 
-  /* Sort Windows by Z-Order (Bottom to Top) */
+  /* Use static buffers to avoid stack pressure/smashing */
   struct window **sorted = sorted_windows;
   struct region **visible_regions = visible_regions_store;
 
@@ -917,7 +917,6 @@ static void compositor_render_internal(void) {
   }
 
   /* Mouse Cursor (Always on top) */
-  /* ... (Existing mouse code) ... */
   static const char *cursor_bits[] = {
       "X           ", "XX          ", "X.X         ", "X..X        ",
       "X...X       ", "X....X      ", "X.....X     ", "X......X    ",
@@ -948,7 +947,7 @@ static void compositor_render_internal(void) {
     }
   }
 
-  in_render = 0;
+  __sync_lock_release(&in_render);
 }
 
 /*
