@@ -33,11 +33,9 @@ extern uint64_t boot_info;
 extern void cpu_init(void);
 extern int cpu_wake_secondary(uint64_t cpu_id, void (*entry)(void),
                               void *stack);
-extern void local_irq_enable(void);
 extern void secondary_cpu_entry(void);
 extern char __kernel_stack[];
-extern uint64_t smp_boot_magic; // Assuming this is a new external symbol for
-                                // the cache flush
+extern uint64_t smp_boot_magic;
 
 /* Forward declarations */
 static void print_banner(void);
@@ -90,11 +88,11 @@ void kernel_main(void) {
 
   /* Write TTBR0 for secondary cores */
   extern uint64_t secondary_ttbr0;
-  uint64_t current_ttbr0 = arch_get_ttbr0();
-  secondary_ttbr0 = current_ttbr0;
+  uint64_t current_pgd = arch_vmm_get_pgd();
+  secondary_ttbr0 = current_pgd;
   /* Flush to PoC so secondary cores see it */
-  arch_clean_cache_va(&secondary_ttbr0);
-  arch_dsb();
+  arch_cache_clean_va(&secondary_ttbr0);
+  arch_data_barrier();
 
   for (int i = 1; i < 4; i++) {
     void *stack = (void *)&__kernel_stack[(i + 1) * 131072];
@@ -119,7 +117,7 @@ void kernel_main(void) {
   /* Enter supervisor loop */
   pr_info("%s", "[Init] Entering supervisor loop\n");
   while (1) {
-    arch_wfi();
+    arch_idle();
   }
 }
 
@@ -214,10 +212,10 @@ static void init_scheduler(void) {
       idle->context->sp_el0 = 0;
 
       /* CRITICAL: Flush idle task context frame and the process struct itself to POC */
-      arch_clean_cache_range_va(idle, sizeof(struct process));
-      arch_clean_cache_range_va(idle->context, sizeof(struct pt_regs));
-      arch_dsb();
-      arch_isb();
+      arch_cache_clean_range(idle, sizeof(struct process));
+      arch_cache_clean_range(idle->context, sizeof(struct pt_regs));
+      arch_data_barrier();
+      arch_instr_barrier();
 
       /* Do NOT enqueue idle tasks — they are CPU-bound fallbacks only.
        * Enqueueing them allows work-stealing to migrate them to the wrong CPU,
@@ -244,6 +242,6 @@ void secondary_cpu_entry(void) {
 
   /* Enter idle loop - scheduler will preempt this */
   while (1) {
-    arch_wfi();
+    arch_idle();
   }
 }

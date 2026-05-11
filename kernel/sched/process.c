@@ -418,10 +418,11 @@ void start_user_process(struct process *proc) {
   /* We don't enqueue the first process, we jump directly to it */
   current_process = proc;
 
-  uint64_t ttbr0 = virt_to_phys(proc->page_table);
+  uint64_t pgd_phys = virt_to_phys(proc->page_table);
   /* Set page table and flush TLB */
-  arch_set_ttbr0(ttbr0);
+  arch_vmm_set_pgd(pgd_phys);
   arch_tlb_flush_all();
+  arch_instr_barrier();
 
   proc->state = PROC_RUNNING;
   proc->on_cpu = cpu_id();
@@ -647,11 +648,11 @@ found:
   }
 
   if (!prev || prev->page_table != next->page_table) {
-    uint64_t next_ttbr0 = virt_to_phys(next->page_table);
-    if (next_ttbr0 != 0) {
-      arch_set_ttbr0(next_ttbr0);
+    uint64_t next_pgd = virt_to_phys(next->page_table);
+    if (next_pgd != 0) {
+      arch_vmm_set_pgd(next_pgd);
       arch_tlb_flush_all();
-      arch_isb();
+      arch_instr_barrier();
     }
   }
 

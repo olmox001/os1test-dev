@@ -227,11 +227,10 @@ void irq_unregister(uint32_t irq) {
 static void cpu_halt_from_ipi(void) {
   extern volatile int panic_flag;
   panic_flag = 1;
-  /* Disable this CPU's virtual timer (CNTV_CTL_EL0 = 0) */
-  __asm__ volatile("msr cntv_ctl_el0, xzr" ::: "memory");
+  /* Disable this CPU's virtual timer */
+  arch_timer_control(0);
   /* Mask all exceptions and park */
-  __asm__ volatile("msr daifset, #0xf" ::: "memory");
-  while (1) { __asm__ volatile("wfe"); }
+  arch_cpu_halt();
 }
 
 struct pt_regs *irq_handler(struct pt_regs *regs) {

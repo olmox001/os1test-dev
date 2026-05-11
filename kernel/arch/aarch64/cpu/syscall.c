@@ -54,20 +54,20 @@ int copy_from_user(void *dest, const void *src, size_t n) {
   spin_lock(&current_process->mm_lock);
 
   /* Save kernel TTBR0 (usually 0 or points to identity map initially) */
-  uint64_t old_ttbr0 = arch_get_ttbr0();
+  uint64_t old_pgd = arch_vmm_get_pgd();
 
   /* Switch to user's page table (must use physical address) */
-  arch_set_ttbr0(virt_to_phys(current_process->page_table));
+  arch_vmm_set_pgd(virt_to_phys(current_process->page_table));
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
 
   /* Perform copy while user space is mapped at TTBR0 */
   memcpy(dest, src, n);
 
   /* Restore kernel/previous TTBR0 */
-  arch_set_ttbr0(old_ttbr0);
+  arch_vmm_set_pgd(old_pgd);
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
 
   spin_unlock(&current_process->mm_lock);
   local_irq_restore(flagsptr);
@@ -90,16 +90,16 @@ int copy_to_user(void *dest, const void *src, size_t n) {
   uint64_t flagsptr = local_irq_save();
   spin_lock(&current_process->mm_lock);
 
-  uint64_t old_ttbr0 = arch_get_ttbr0();
-  arch_set_ttbr0(virt_to_phys(current_process->page_table));
+  uint64_t old_pgd = arch_vmm_get_pgd();
+  arch_vmm_set_pgd(virt_to_phys(current_process->page_table));
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
 
   memcpy(dest, src, n);
 
-  arch_set_ttbr0(old_ttbr0);
+  arch_vmm_set_pgd(old_pgd);
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
 
   spin_unlock(&current_process->mm_lock);
   local_irq_restore(flagsptr);
@@ -119,10 +119,10 @@ int copy_string_from_user(char *dest, const char *src, size_t max_len) {
   uint64_t flagsptr = local_irq_save();
   spin_lock(&current_process->mm_lock);
 
-  uint64_t old_ttbr0 = arch_get_ttbr0();
-  arch_set_ttbr0(virt_to_phys(current_process->page_table));
+  uint64_t old_pgd = arch_vmm_get_pgd();
+  arch_vmm_set_pgd(virt_to_phys(current_process->page_table));
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
 
   int ret = 0;
   size_t i;
@@ -140,9 +140,9 @@ int copy_string_from_user(char *dest, const char *src, size_t max_len) {
   dest[max_len - 1] = '\0';
 
 out:
-  arch_set_ttbr0(old_ttbr0);
+  arch_vmm_set_pgd(old_pgd);
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
   spin_unlock(&current_process->mm_lock);
   local_irq_restore(flagsptr);
   return ret;

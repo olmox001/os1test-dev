@@ -63,12 +63,12 @@ void cpu_init(void) {
   uint64_t cpacr = arch_get_cpacr();
   cpacr |= (3 << 20); /* FPEN bits [21:20] = 0b11 */
   arch_set_cpacr(cpacr);
-  arch_isb();
+  arch_instr_barrier();
 
   /* Install exception vector table */
   exception_vectors_install();
 
-  pr_info("CPU: VBAR_EL1 set to 0x%lx\n", arch_get_vbar());
+  pr_info("CPU: Vector Table set to 0x%lx\n", arch_get_vector_table());
 }
 
 /*

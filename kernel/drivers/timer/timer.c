@@ -37,25 +37,25 @@ static spinlock_t timer_lock = SPINLOCK_INIT;
 /*
  * Read counter frequency
  */
-static inline uint64_t read_cntfrq(void) { return arch_cntfrq_el0_read(); }
+static inline uint64_t read_cntfrq(void) { return arch_timer_get_freq(); }
 
 /*
  * Read virtual counter
  */
-static inline uint64_t read_cntvct(void) { return arch_cntvct_el0_read(); }
+static inline uint64_t read_cntvct(void) { return arch_timer_get_count(); }
 
 /*
  * Set virtual timer compare value (EL1 virtual timer)
  */
 static inline void write_cntv_cval(uint64_t val) {
-  arch_cntv_cval_el0_write(val);
+  arch_timer_set_compare(val);
 }
 
 /*
  * Set virtual timer control (EL1 virtual timer)
  */
 static inline void write_cntv_ctl(uint64_t val) {
-  arch_cntv_ctl_el0_write(val);
+  arch_timer_control(val);
 }
 
 /*
@@ -71,8 +71,7 @@ struct pt_regs *timer_handler(struct pt_regs *regs) {
   /* Halt this CPU if another CPU panicked */
   if (panic_flag) {
     write_cntv_ctl(0); /* Disable timer */
-    arch_local_irq_disable();
-    while (1) { __asm__ volatile("wfe"); }
+    arch_cpu_halt();
   }
 
   struct cpu_info *cpu = get_cpu_info();

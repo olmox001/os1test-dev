@@ -111,7 +111,7 @@ char uart_getc(void) {
   while (rx_head == rx_tail) {
     /* Wait for interrupt (wfi) to save power? */
     /* Or just busy wait for now */
-    arch_wfi();
+    arch_idle();
   }
 
   char c = rx_buf[rx_tail];

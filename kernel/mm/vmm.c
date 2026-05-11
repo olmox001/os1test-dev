@@ -67,15 +67,15 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc) {
 
   /* Zero and Flush the new table page */
   memset(page, 0, 4096);
-  arch_clean_cache_range_va(page, 4096);
-  arch_dsb();
+  arch_cache_clean_range(page, 4096);
+  arch_data_barrier();
 
   table[index] = phys | PTE_TABLE | PTE_VALID | PTE_AF | PTE_INNER_SHARE |
                  PTE_RW | PTE_AP_EL1_RW | PTE_PXN;
 
   /* Flush the directory entry itself */
-  arch_clean_cache_va(&table[index]);
-  arch_dsb();
+  arch_cache_clean_va(&table[index]);
+  arch_data_barrier();
 
   return page;
 }
@@ -118,13 +118,13 @@ int vmm_map_page(uint64_t *pgd, uint64_t virt, uint64_t phys, uint64_t flags) {
   }
 
   *pt_entry = phys | flags;
-  arch_clean_cache_va(pt_entry);
-  arch_dsb();
+  arch_cache_clean_va(pt_entry);
+  arch_data_barrier();
 
   /* Flush TLB for this address to ensure consistency */
   arch_tlb_flush_va(virt);
-  arch_dsb();
-  arch_isb();
+  arch_data_barrier();
+  arch_instr_barrier();
 
   return 0;
 }
@@ -195,13 +195,13 @@ void vmm_unmap_page(uint64_t *pgd, uint64_t virt) {
 
   uint64_t *pt_entry = &pt[PT_INDEX(virt)];
   *pt_entry = 0;
-  arch_clean_cache_va(pt_entry);
-  arch_dsb();
+  arch_cache_clean_va(pt_entry);
+  arch_data_barrier();
 
-  /* TLB invalidate for this page */
+  /* TLB Invalidation */
   arch_tlb_flush_va(virt);
-  arch_dsb();
-  arch_isb();
+  arch_data_barrier();
+  arch_instr_barrier();
 }
 
 /* Internal helper with locking */
@@ -243,7 +243,7 @@ void vmm_init(void) {
     panic("VMM: Failed to allocate kernel PGD\n");
   }
   memset(kernel_pgd, 0, 4096);
-  arch_clean_cache_range_va(kernel_pgd, 4096);
+  arch_cache_clean_range(kernel_pgd, 4096);
 
   /* 1. Map RAM with correct permissions */
   extern char _etext[];
@@ -287,7 +287,7 @@ void vmm_init(void) {
       }
     }
   }
-  arch_dsb(); /* Wait for flushes */
+  arch_data_barrier(); /* Wait for flushes */
 
   /* 2. Identity Map MMIO (UART, GIC, VirtIO) */
   /* 0x08000000 to 0x0A000000 covers typical QEMU virt devices */
@@ -317,7 +317,7 @@ void vmm_init(void) {
   arch_set_tcr(tcr);
 
   /* 5. Set TTBR0_EL1 */
-  arch_set_ttbr0((uint64_t)kernel_pgd);
+  arch_vmm_set_pgd((uint64_t)kernel_pgd);
 
   /* 6. Enable MMU in SCTLR_EL1 */
   uint64_t sctlr = arch_get_sctlr();
@@ -325,7 +325,7 @@ void vmm_init(void) {
            (1UL << 12) | /* I: Instruction cache enable */
            (1UL << 2);   /* C: Data cache enable */
   arch_set_sctlr(sctlr);
-  arch_isb();
+  arch_instr_barrier();
 
   pr_info("VMM: MMU Enabled. Kernel PGD at %p\n", (void *)kernel_pgd);
 }
@@ -343,7 +343,7 @@ uint64_t *vmm_create_pgd(void) {
 
   /* Zero out new PGD */
   memset(pgd, 0, 4096);
-  arch_clean_cache_range_va(pgd, 4096);
+  arch_cache_clean_range(pgd, 4096);
 
   /* We must provide the kernel identity map to the new process.
    * Our identity map is in PGD index 0.
@@ -362,9 +362,9 @@ uint64_t *vmm_create_pgd(void) {
        */
       dst_pud[0] = src_pud[0];
       dst_pud[1] = src_pud[1];
-      arch_clean_cache_range_va(dst_pud, 4096);
+      arch_cache_clean_range(dst_pud, 4096);
       pgd[0] = (uint64_t)dst_pud | (kernel_pgd[0] & ~PTE_ADDR_MASK);
-      arch_clean_cache_va(&pgd[0]);
+      arch_cache_clean_va(&pgd[0]);
     }
   }
 
@@ -372,9 +372,9 @@ uint64_t *vmm_create_pgd(void) {
   for (int i = 1; i < 512; i++) {
     pgd[i] = kernel_pgd[i];
     if (pgd[i])
-      arch_clean_cache_va(&pgd[i]);
+      arch_cache_clean_va(&pgd[i]);
   }
-  arch_dsb();
+  arch_data_barrier();
 
   return pgd;
 }
