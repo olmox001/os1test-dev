@@ -2,9 +2,8 @@
  * kernel/kernel.c
  * Main kernel initialization and entry point
  */
+#include <kernel/drivers.h>
 #include <drivers/keyboard.h>
-#include <drivers/timer.h>
-#include <drivers/uart.h>
 #include <drivers/virtio_blk.h>
 #include <drivers/virtio_gpu.h>
 #include <kernel/arch.h>
@@ -28,7 +27,11 @@
 #define KERNEL_VERSION_MAJOR 0
 #define KERNEL_VERSION_MINOR 1
 #define KERNEL_VERSION_PATCH 0
+#ifdef ARCH_AMD64
+#define KERNEL_NAME "AMD64 Microkernel"
+#else
 #define KERNEL_NAME "AArch64 Microkernel"
+#endif
 
 /* External symbols */
 extern void secondary_cpu_entry(void);
@@ -42,11 +45,24 @@ static void init_scheduler(void);
  * Kernel main entry point
  */
 /* Forward declaration for kernel_main */
+#ifdef ARCH_AMD64
+void kernel_main(uint64_t mb_info_ptr_arg);
+#else
 void kernel_main(void);
+#endif
+extern void timer_init_percpu(void);
 
+/* Kernel entry point - receives multiboot info pointer from bootloader */
+#ifdef ARCH_AMD64
+void kernel_main(uint64_t mb_info_ptr_arg) {
+  /* For AMD64, bootloader passes mb_info_ptr via RDI */
+  extern uint64_t mb_info_ptr;
+  mb_info_ptr = mb_info_ptr_arg;
+#else
 void kernel_main(void) {
+#endif
   /* Initialize UART first for debug output */
-  uart_init();
+  driver_console_init();
 
   /* Print kernel banner */
   print_banner();
@@ -60,12 +76,13 @@ void kernel_main(void) {
 
   /* Platform-specific hardware registration */
   arch_platform_early_init();
+  driver_irq_init();
   irq_init();
   irq_init_percpu();
 
   /* System timer */
   pr_info("%s", "Initializing timer...\n");
-  timer_init();
+  driver_timer_init();
   timer_init_percpu();
 
   /* Memory management */
@@ -130,7 +147,7 @@ static void print_banner(void) {
   printk("========================================\n");
   printk("  %s v%d.%d.%d\n", KERNEL_NAME, KERNEL_VERSION_MAJOR,
          KERNEL_VERSION_MINOR, KERNEL_VERSION_PATCH);
-  printk("  Production-Ready AArch64 Kernel\n");
+  printk("  Production-Ready Microkernel\n");
   printk("========================================\n");
   printk("\n");
 }
@@ -208,9 +225,8 @@ static void init_scheduler(void) {
       
       /* Explicitly initialize context to known state */
       memset(idle->context, 0, sizeof(struct pt_regs));
-      idle->context->elr = (uint64_t)idle_task_entry;
-      idle->context->spsr = 0x05; /* EL1h + Unmasked */
-      idle->context->sp_el0 = 0;
+      pt_regs_init_kernel_task(idle->context, (uint64_t)idle_task_entry,
+                               idle->kernel_stack);
 
       /* CRITICAL: Flush idle task context frame and the process struct itself to POC */
       arch_cache_clean_range(idle, sizeof(struct process));
