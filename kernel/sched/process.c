@@ -27,12 +27,13 @@ static int rr_cpu = 0;
 int keyboard_focus_pid = 7; /* Default to Shell PID */
 
 /* Helper: Add task to runqueue */
-void enqueue_task(struct process *p) {
-  int target_cpu = (int)p->on_cpu;
-  if (target_cpu < 0)
-    target_cpu = 0; /* Fallback */
+/* Internal helper: Add task to runqueue (Caller MUST hold target->sched_lock) */
+static void __enqueue_task(struct process *p) {
+  int target_cpu_id = (int)p->on_cpu;
+  if (target_cpu_id < 0)
+    target_cpu_id = 0;
 
-  struct cpu_info *target = &cpu_data[target_cpu];
+  struct cpu_info *target_cpu = &cpu_data[target_cpu_id];
 
   /* Skip if already on a runqueue */
   if (p->state == PROC_READY && p->run_list.next != &p->run_list) {
@@ -40,22 +41,33 @@ void enqueue_task(struct process *p) {
   }
 
   p->state = PROC_READY;
+  p->on_cpu = target_cpu_id; /* Track which CPU's runqueue we are on */
   int prio = p->priority;
   if (prio >= MAX_PRIO)
     prio = MAX_PRIO - 1;
 
-  /* Caller MUST hold target->sched_lock */
-  list_add_tail(&p->run_list, &target->runqueues[prio]);
-  target->prio_bitmap |= (1 << prio);
+  list_add_tail(&p->run_list, &target_cpu->runqueues[prio]);
+  target_cpu->prio_bitmap |= (1 << prio);
 
   /* Wake up any idling CPUs */
   arch_sev();
 }
 
-/* Helper: Remove task from runqueue */
-static void dequeue_task(struct process *p) {
-  struct cpu_info *cpu = get_cpu_info();
-  int target_cpu = (p->on_cpu >= 0) ? p->on_cpu : (int)cpu->cpu_id;
+void enqueue_task(struct process *p) {
+  uint64_t flags;
+  int target_cpu_id = (int)p->on_cpu;
+  if (target_cpu_id < 0)
+    target_cpu_id = 0;
+
+  struct cpu_info *target_cpu = &cpu_data[target_cpu_id];
+  spin_lock_irqsave(&target_cpu->sched_lock, &flags);
+  __enqueue_task(p);
+  spin_unlock_irqrestore(&target_cpu->sched_lock, flags);
+}
+
+/* Helper: Remove task from runqueue (Caller MUST hold target->sched_lock) */
+static void __dequeue_task(struct process *p) {
+  int target_cpu = (p->on_cpu >= 0) ? p->on_cpu : 0;
   struct cpu_info *target = &cpu_data[target_cpu];
 
   /* Paranoia check for corruption */
@@ -64,7 +76,7 @@ static void dequeue_task(struct process *p) {
   }
 
   list_del_init(&p->run_list);
-  if (list_empty(&target->runqueues[p->priority])) {
+  if (p->priority < MAX_PRIO && list_empty(&target->runqueues[p->priority])) {
     target->prio_bitmap &= ~(1 << p->priority);
   }
 }
@@ -121,7 +133,7 @@ void wake_up(struct wait_queue_head *wq) {
   struct cpu_info *target = &cpu_data[target_cpu];
 
   spin_lock_irqsave(&target->sched_lock, &flags);
-  enqueue_task(p);
+  __enqueue_task(p);
   spin_unlock_irqrestore(&target->sched_lock, flags);
 }
 
@@ -169,12 +181,26 @@ static int find_free_slot(void) {
 /*
  * Find process by PID
  */
-struct process *process_find_by_pid(int pid) {
+/*
+ * Find process by PID (Internal - NO LOCK)
+ */
+struct process *__process_find_by_pid(int pid) {
   for (int i = 0; i < MAX_PROCESSES; i++) {
     if (process_pool[i] && (int)process_pool[i]->pid == pid)
       return process_pool[i];
   }
   return NULL;
+}
+
+/*
+ * Find process by PID (External - WITH LOCK)
+ */
+struct process *process_find_by_pid(int pid) {
+  uint64_t flags;
+  spin_lock_irqsave(&sched_lock, &flags);
+  struct process *proc = __process_find_by_pid(pid);
+  spin_unlock_irqrestore(&sched_lock, flags);
+  return proc;
 }
 
 /*
@@ -275,7 +301,7 @@ int process_terminate(int pid) {
   uint64_t flags;
   spin_lock_irqsave(&sched_lock, &flags);
 
-  struct process *proc = process_find_by_pid(pid);
+  struct process *proc = __process_find_by_pid(pid);
   if (!proc) {
     spin_unlock_irqrestore(&sched_lock, flags);
     return -1;
@@ -308,7 +334,15 @@ int process_terminate(int pid) {
     proc->wait_queue_ptr = NULL;
     spin_unlock(&wq->lock);
   } else if (proc->state == PROC_READY) {
-    dequeue_task(proc);
+    /* CRITICAL: Acquire target CPU's sched_lock before removing from its runqueue */
+    int t_id = (proc->on_cpu >= 0) ? proc->on_cpu : 0;
+    struct cpu_info *t_cpu = &cpu_data[t_id];
+    
+    /* We already hold the global sched_lock, but we must also hold the per-CPU lock 
+     * to prevent races with the scheduler on that CPU. */
+    spin_lock(&t_cpu->sched_lock);
+    __dequeue_task(proc);
+    spin_unlock(&t_cpu->sched_lock);
   }
 
   /* Cleanup resources */
@@ -332,9 +366,28 @@ int process_terminate(int pid) {
     return 0;
   }
 
+  /* Free IPC message queue to prevent leak */
+  {
+    struct list_head *pos, *q;
+    list_for_each_safe(pos, q, &proc->msg_queue) {
+      struct ipc_node *node = list_entry(pos, struct ipc_node, list);
+      list_del(pos);
+      kfree(node);
+    }
+  }
+
   proc->state = PROC_DEAD;
 
-  /* Remove from pool */
+  if (proc->on_cpu >= 0) {
+    /* Process is currently executing on another CPU.
+     * We cannot free its kernel stack while it's being used.
+     * Leave it in the pool as PROC_DEAD; schedule() on that CPU
+     * will perform the deferred free after switching away. */
+    spin_unlock_irqrestore(&sched_lock, flags);
+    return 0;
+  }
+
+  /* Not running on any CPU — safe to free immediately */
   process_pool[slot] = NULL;
   active_count--;
 
@@ -352,9 +405,6 @@ int process_terminate(int pid) {
   return 0;
 }
 
-/* Assembly helper to jump to user mode */
-extern void enter_user_mode(uint64_t entry, uint64_t sp, uint64_t ksp);
-
 /*
  * This is called for the FIRST run of a process.
  */
@@ -365,14 +415,15 @@ void start_user_process(struct process *proc) {
   /* We don't enqueue the first process, we jump directly to it */
   current_process = proc;
 
-  uint64_t ttbr0 = virt_to_phys(proc->page_table);
+  uint64_t pgd_phys = virt_to_phys(proc->page_table);
   /* Set page table and flush TLB */
-  arch_set_ttbr0(ttbr0);
+  arch_vmm_set_pgd(pgd_phys);
   arch_tlb_flush_all();
+  arch_instr_barrier();
 
   proc->state = PROC_RUNNING;
   proc->on_cpu = cpu_id();
-  enter_user_mode(proc->user_entry, proc->user_stack, proc->kernel_stack);
+  arch_enter_user_mode(proc->user_entry, proc->user_stack, proc->kernel_stack);
 }
 
 /*
@@ -382,6 +433,31 @@ struct pt_regs *schedule(struct pt_regs *regs) {
   struct cpu_info *cpu_ptr = get_cpu_info();
   if (!cpu_ptr)
     return regs;
+
+  /* Deferred process free: safe to do here because we've already switched
+   * away from that process's kernel stack in the previous schedule() call. */
+  if (cpu_ptr->deferred_free_proc) {
+    struct process *to_free = cpu_ptr->deferred_free_proc;
+    cpu_ptr->deferred_free_proc = NULL;
+
+    /* Remove from pool */
+    uint64_t gflags;
+    spin_lock_irqsave(&sched_lock, &gflags);
+    for (int _i = 0; _i < MAX_PROCESSES; _i++) {
+      if (process_pool[_i] == to_free) {
+        process_pool[_i] = NULL;
+        active_count--;
+        break;
+      }
+    }
+    spin_unlock_irqrestore(&sched_lock, gflags);
+
+    if (to_free->kernel_stack)
+      pmm_free_pages((void *)(to_free->kernel_stack - STACK_SIZE), STACK_SIZE / 4096);
+    if (to_free->page_table)
+      vmm_destroy_pgd(to_free->page_table);
+    pmm_free_page(to_free);
+  }
 
   uint32_t cpu = cpu_ptr->cpu_id;
   struct process *prev = cpu_ptr->current_task;
@@ -397,11 +473,22 @@ struct pt_regs *schedule(struct pt_regs *regs) {
 
     /* 1. Handle Current Process */
     if (prev) {
+      /* Check if externally terminated while running on this CPU */
+      if (prev->state == PROC_DEAD) {
+        /* Cannot free kernel_stack here (we're standing on it).
+         * Defer the free to the NEXT schedule() call. */
+        prev->on_cpu = -1;
+        cpu_ptr->deferred_free_proc = prev;
+        cpu_ptr->current_task = NULL;
+        prev = NULL;
+        goto pick_next;
+      }
+
       /* Save current context if it was running */
       if (regs) {
         prev->context = regs;
       }
-      
+
       /* Clear first_run flag since it has now been scheduled and preempted/yielded */
       if (prev->first_run) {
         prev->first_run = 0;
@@ -421,12 +508,18 @@ struct pt_regs *schedule(struct pt_regs *regs) {
       }
 
       if (prev->state == PROC_READY) {
-        prev->on_cpu = -1;
-        enqueue_task(prev);
+        /* Never re-enqueue the CPU-bound idle task. It must stay out of the
+         * runqueue to prevent work-stealing: two CPUs sharing one idle task's
+         * kernel stack causes context corruption (ELR=0 crashes). */
+        if (prev->priority != PROC_PRIO_IDLE) {
+          __enqueue_task(prev);
+        }
       } else {
-        prev->on_cpu = -1;
+        /* Task is sleeping or dying, keep on_cpu to indicate last CPU for affinity or tracking */
       }
     }
+
+pick_next:;
 
   /* 2. Pick Next Process (O(1) Priority-based Selection) */
   struct process *next = NULL;
@@ -439,7 +532,7 @@ struct pt_regs *schedule(struct pt_regs *regs) {
       list_for_each_entry(it, &cpu_ptr->runqueues[p], run_list) {
         if ((int)it->pid == focus_pid) {
           next = it;
-          dequeue_task(next);
+          __dequeue_task(next);
           goto found;
         }
       }
@@ -453,7 +546,7 @@ struct pt_regs *schedule(struct pt_regs *regs) {
     if (best_prio < MAX_PRIO && !list_empty(&cpu_ptr->runqueues[best_prio])) {
       struct list_head *entry = cpu_ptr->runqueues[best_prio].next;
       next = container_of(entry, struct process, run_list);
-      dequeue_task(next);
+      __dequeue_task(next);
     }
   }
 
@@ -478,14 +571,14 @@ found:
             struct list_head *entry = other_cpu->runqueues[p].next;
             next = container_of(entry, struct process, run_list);
 
-            /* Only steal if not currently running on that CPU (redundant
-             * check if dequeued?) */
-            /* Actually dequeueing it makes it ours. */
-            /* But if it WAS running, it wouldn't be in runqueue (unless we
-             * re-queue running tasks?) */
-            /* The logic removes running task from queue usually? */
-            /* Checking `dequeue_task`: it uses `msg_queue`? No. */
-            /* We assume tasks in runqueue are READY and not RUNNING. */
+            /* Never steal idle-priority tasks — they are CPU-bound and share a
+             * kernel stack with their owner CPU. Check priority, not pointer,
+             * so this also catches any idle task that migrated via wake_up. */
+            if (next->priority == PROC_PRIO_IDLE) {
+              next = NULL;
+              spin_unlock(&other_cpu->sched_lock);
+              continue;
+            }
 
             /* Remove from other CPU */
             list_del_init(&next->run_list);
@@ -505,6 +598,10 @@ found:
     }
     /* If current task is still READY, just keep running it */
     if (prev && prev->state == PROC_RUNNING) {
+      if (regs->elr == 0) {
+        panic("SCHED: [CPU%d] BUG elr==0 on PROC_RUNNING fast-path, PID %d", cpu,
+              prev->pid);
+      }
       spin_unlock_irqrestore(&cpu_ptr->sched_lock, flags);
       return regs;
     }
@@ -520,6 +617,10 @@ found:
 
   /* 3. Context Switch Logic */
   if (prev == next) {
+    if (regs->elr == 0) {
+      panic("SCHED: [CPU%d] BUG elr==0 on same-task return, PID %d", cpu,
+            prev->pid);
+    }
     next->state = PROC_RUNNING;
     next->on_cpu = cpu;
     spin_unlock_irqrestore(&cpu_ptr->sched_lock, flags);
@@ -544,11 +645,11 @@ found:
   }
 
   if (!prev || prev->page_table != next->page_table) {
-    uint64_t next_ttbr0 = virt_to_phys(next->page_table);
-    if (next_ttbr0 != 0) {
-      arch_set_ttbr0(next_ttbr0);
+    uint64_t next_pgd = virt_to_phys(next->page_table);
+    if (next_pgd != 0) {
+      arch_vmm_set_pgd(next_pgd);
       arch_tlb_flush_all();
-      arch_isb();
+      arch_instr_barrier();
     }
   }
 
@@ -567,7 +668,6 @@ int process_wait(int pid) {
     struct process *proc = process_pool[i];
     if (proc && (int)proc->pid == pid) {
       if (proc->state == PROC_DEAD || proc->state == PROC_ZOMBIE) {
-
         if (proc->state == PROC_ZOMBIE) {
           /* Now we can safely free the zombie's resources */
           pr_info("Reaping zombie process %d\n", pid);
@@ -620,11 +720,6 @@ struct ipc_node *pop_message(struct process *proc, int src_pid) {
  * IPC Implementation (Internal)
  */
 int kernel_ipc_send(int target_pid, struct ipc_message *msg) {
-  /* pr_err("kernel_ipc_send: target=%d type=%d\n", target_pid, msg->type); */
-  struct process *target = process_find_by_pid(target_pid);
-  if (!target)
-    return -1;
-
   struct ipc_node *node = (struct ipc_node *)kmalloc(sizeof(struct ipc_node));
   if (!node)
     return -1;
@@ -632,36 +727,48 @@ int kernel_ipc_send(int target_pid, struct ipc_message *msg) {
   memcpy(&node->msg, msg, sizeof(struct ipc_message));
 
   uint64_t flags;
-  spin_lock_irqsave(&target->msg_lock, &flags);
-  list_add_tail(&node->list, &target->msg_queue);
+  spin_lock_irqsave(&sched_lock, &flags);
 
-  /* Check if target is waiting for THIS sender or ANY sender */
+  struct process *target = __process_find_by_pid(target_pid);
+  if (!target || target->state == PROC_DEAD || target->state == PROC_ZOMBIE) {
+    spin_unlock_irqrestore(&sched_lock, flags);
+    kfree(node);
+    return -1;
+  }
+
+  /* We must hold target->msg_lock while adding to its queue. 
+   * To avoid AB-BA deadlocks with sched_lock, we use trylock or 
+   * we ensure a fixed order: sched_lock -> target->msg_lock.
+   */
+  spin_lock(&target->msg_lock);
+  list_add_tail(&node->list, &target->msg_queue);
+  
+  /* Check if target is waiting */
   if (target->state == PROC_SLEEPING &&
       (target->ipc_target_pid == -1 ||
        target->ipc_target_pid == (int)msg->from)) {
-
-    spin_unlock_irqrestore(&target->msg_lock, flags);
-
-    /* Wake target: use its local sched_lock */
+    
+    /* Wake target: transition state while holding sched_lock is safe */
+    target->state = PROC_READY;
+    
+    /* To enqueue, we need target CPU's sched_lock */
     int t_id = (target->on_cpu >= 0) ? target->on_cpu : 0;
     struct cpu_info *target_cpu = &cpu_data[t_id];
-    spin_lock_irqsave(&target_cpu->sched_lock, &flags);
-    if (target->state == PROC_SLEEPING) {
-      target->state = PROC_READY;
-      enqueue_task(target);
-    }
-    spin_unlock_irqrestore(&target_cpu->sched_lock, flags);
-    return 0;
+    
+    spin_lock(&target_cpu->sched_lock);
+    __enqueue_task(target);
+    spin_unlock(&target_cpu->sched_lock);
   }
-
-  spin_unlock_irqrestore(&target->msg_lock, flags);
+  
+  spin_unlock(&target->msg_lock);
+  spin_unlock_irqrestore(&sched_lock, flags);
+  
   return 0;
 }
 
 int sys_ipc_send(int target_pid, void *msg_ptr) {
   struct ipc_message k_msg;
-  extern int copy_from_user(void *dest, const void *src, size_t n);
-  if (copy_from_user(&k_msg, msg_ptr, sizeof(struct ipc_message)) != 0) {
+  if (vmm_copy_from_user(&k_msg, msg_ptr, sizeof(struct ipc_message)) != 0) {
     return -1;
   }
   k_msg.from = current_process->pid;
@@ -672,8 +779,7 @@ int sys_ipc_recv(int src_pid, void *msg_ptr) {
   /* 1. Try to pop an existing message */
   struct ipc_node *node = pop_message(current_process, src_pid);
   if (node) {
-    extern int copy_to_user(void *dest, const void *src, size_t n);
-    if (copy_to_user(msg_ptr, &node->msg, sizeof(struct ipc_message)) != 0) {
+    if (vmm_copy_to_user(msg_ptr, &node->msg, sizeof(struct ipc_message)) != 0) {
       /* Drop node and return error */
       kfree(node);
       return -1;
@@ -700,8 +806,7 @@ int sys_ipc_recv(int src_pid, void *msg_ptr) {
 int sys_ipc_try_recv(int src_pid, void *msg_ptr) {
   struct ipc_node *node = pop_message(current_process, src_pid);
   if (node) {
-    extern int copy_to_user(void *dest, const void *src, size_t n);
-    if (copy_to_user(msg_ptr, &node->msg, sizeof(struct ipc_message)) != 0) {
+    if (vmm_copy_to_user(msg_ptr, &node->msg, sizeof(struct ipc_message)) != 0) {
       kfree(node);
       return -1;
     }
@@ -736,8 +841,7 @@ long sys_getprocs(struct ps_info *user_buf, size_t max_count) {
   }
   spin_unlock_irqrestore(&sched_lock, flags);
 
-  extern int copy_to_user(void *dest, const void *src, size_t n);
-  copy_to_user(user_buf, k_buf, sizeof(struct ps_info) * count);
+  vmm_copy_to_user(user_buf, k_buf, sizeof(struct ps_info) * count);
   kfree(k_buf);
   return count;
 }

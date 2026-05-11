@@ -212,8 +212,8 @@ static void *zone_alloc_page(struct zone *z) {
 
   void *addr = (void *)(MEMORY_BASE + pfn_to_phys(abs_pfn));
   memset(addr, 0, PAGE_SIZE);
-  arch_clean_cache_range_va(addr, PAGE_SIZE);
-  arch_dsb();
+  arch_cache_clean_range(addr, PAGE_SIZE);
+  arch_data_barrier();
 
   __sync_fetch_and_sub(&free_pages, 1);
 
@@ -303,11 +303,8 @@ void pmm_free_page(void *page) {
     return;
   }
 
-  if (pg->refcount == 0) {
-    panic("PMM: Refcount underflow for page %p", page);
-  }
-
-  if (--pg->refcount > 0)
+  /* Atomic decrement and check if it was the last reference */
+  if (__sync_fetch_and_sub(&pg->refcount, 1) > 1)
     return;
 
   /* Find which zone this belongs to */

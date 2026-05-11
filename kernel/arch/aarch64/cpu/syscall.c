@@ -32,11 +32,19 @@ extern void compositor_render(void);
 extern void compositor_set_window_flags(int window_id, int flags);
 
 /* Secure memory access helpers with Page Table Switching */
-int copy_from_user(void *dest, const void *src, size_t n) {
-  if (!vmm_is_user_addr((uint64_t)src) || !vmm_is_user_addr((uint64_t)src + n))
+int arch_copy_from_user(void *dest, const void *src, size_t n) {
+  uint64_t src_addr = (uint64_t)src;
+  if (src_addr + n < src_addr)
+    return -1; /* Wrap around */
+
+  if (!vmm_is_user_addr(src_addr) || !vmm_is_user_addr(src_addr + n))
     return -1;
 
   if (!current_process || !current_process->page_table)
+    return -1;
+
+  /* Check if range is valid and mapped in user page table */
+  if (vmm_check_range(current_process->page_table, src_addr, n, PTE_VALID) != 0)
     return -1;
 
   /* Save and disable interrupts to prevent scheduler preemption */
@@ -46,20 +54,20 @@ int copy_from_user(void *dest, const void *src, size_t n) {
   spin_lock(&current_process->mm_lock);
 
   /* Save kernel TTBR0 (usually 0 or points to identity map initially) */
-  uint64_t old_ttbr0 = arch_get_ttbr0();
+  uint64_t old_pgd = arch_vmm_get_pgd();
 
   /* Switch to user's page table (must use physical address) */
-  arch_set_ttbr0(virt_to_phys(current_process->page_table));
+  arch_vmm_set_pgd(virt_to_phys(current_process->page_table));
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
 
   /* Perform copy while user space is mapped at TTBR0 */
   memcpy(dest, src, n);
 
   /* Restore kernel/previous TTBR0 */
-  arch_set_ttbr0(old_ttbr0);
+  arch_vmm_set_pgd(old_pgd);
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
 
   spin_unlock(&current_process->mm_lock);
   local_irq_restore(flagsptr);
@@ -67,27 +75,31 @@ int copy_from_user(void *dest, const void *src, size_t n) {
   return 0;
 }
 
-int copy_to_user(void *dest, const void *src, size_t n) {
-  if (!vmm_is_user_addr((uint64_t)dest) ||
-      !vmm_is_user_addr((uint64_t)dest + n))
+int arch_copy_to_user(void *dest, const void *src, size_t n) {
+  uint64_t dest_addr = (uint64_t)dest;
+  if (dest_addr + n < dest_addr)
+    return -1; /* Wrap around */
+    
+  if (!vmm_is_user_addr(dest_addr) ||
+      !vmm_is_user_addr(dest_addr + n))
     return -1;
 
-  if (!current_process || !current_process->page_table)
+  if (vmm_check_range(current_process->page_table, dest_addr, n, PTE_VALID) != 0)
     return -1;
 
   uint64_t flagsptr = local_irq_save();
   spin_lock(&current_process->mm_lock);
 
-  uint64_t old_ttbr0 = arch_get_ttbr0();
-  arch_set_ttbr0(virt_to_phys(current_process->page_table));
+  uint64_t old_pgd = arch_vmm_get_pgd();
+  arch_vmm_set_pgd(virt_to_phys(current_process->page_table));
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
 
   memcpy(dest, src, n);
 
-  arch_set_ttbr0(old_ttbr0);
+  arch_vmm_set_pgd(old_pgd);
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
 
   spin_unlock(&current_process->mm_lock);
   local_irq_restore(flagsptr);
@@ -97,7 +109,7 @@ int copy_to_user(void *dest, const void *src, size_t n) {
 
 /* Copy null-terminated string from user space safely with Page Table Switching
  */
-int copy_string_from_user(char *dest, const char *src, size_t max_len) {
+int arch_copy_string_from_user(char *dest, const char *src, size_t max_len) {
   if (!vmm_is_user_addr((uint64_t)src))
     return -1;
 
@@ -107,15 +119,20 @@ int copy_string_from_user(char *dest, const char *src, size_t max_len) {
   uint64_t flagsptr = local_irq_save();
   spin_lock(&current_process->mm_lock);
 
-  uint64_t old_ttbr0 = arch_get_ttbr0();
-  arch_set_ttbr0(virt_to_phys(current_process->page_table));
+  uint64_t old_pgd = arch_vmm_get_pgd();
+  arch_vmm_set_pgd(virt_to_phys(current_process->page_table));
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
 
   int ret = 0;
   size_t i;
   for (i = 0; i < max_len - 1; i++) {
-    /* Potential optimization: check page boundaries if max_len is large */
+    /* Check each page boundary for mapping if we cross it */
+    if (((uint64_t)&src[i] & 0xFFF) == 0) {
+       if (vmm_check_range(current_process->page_table, (uint64_t)&src[i], 1, PTE_VALID) != 0)
+         goto out;
+    }
+    
     dest[i] = src[i];
     if (src[i] == '\0')
       goto out;
@@ -123,9 +140,9 @@ int copy_string_from_user(char *dest, const char *src, size_t max_len) {
   dest[max_len - 1] = '\0';
 
 out:
-  arch_set_ttbr0(old_ttbr0);
+  arch_vmm_set_pgd(old_pgd);
   arch_tlb_flush_all();
-  arch_isb();
+  arch_instr_barrier();
   spin_unlock(&current_process->mm_lock);
   local_irq_restore(flagsptr);
   return ret;
@@ -175,8 +192,8 @@ struct pt_regs *sys_read(struct pt_regs *regs) {
   if (node) {
     if (node->msg.type == IPC_TYPE_INPUT) {
       char c = (char)node->msg.data1;
-      if (copy_to_user(buf, &c, 1) != 0) {
-        /* pr_err("%s", "sys_read: copy_to_user failed\n"); */
+      if (arch_copy_to_user(buf, &c, 1) != 0) {
+        /* pr_err("%s", "sys_read: arch_copy_to_user failed\n"); */
       }
       regs->regs[0] = 1;
       kfree(node);
@@ -208,7 +225,7 @@ long sys_write(int fd, const char *buf, size_t count) {
   size_t to_copy = (count > 1024) ? 1024 : count;
   /* pr_err("sys_write: fd=%d count=%lu\n", fd, count); */
 
-  if (copy_from_user(k_buf, buf, to_copy) != 0)
+  if (arch_copy_from_user(k_buf, buf, to_copy) != 0)
     return -1;
   k_buf[to_copy] = '\0';
 
@@ -235,15 +252,8 @@ void sys_exit(int status) {
   if (current_process) {
     pr_info("PID %d exiting with status %d\n", current_process->pid, status);
     process_terminate(current_process->pid);
-
-    /* We are now ZOMBIE (if terminate worked). Switch away immediately. */
-    /* Note: We use current_process->context which points to our kernel stack
-       frame. schedule() will save our state there (not strictly needed since we
-       are dead) and switch to next task. */
-    schedule(current_process->context);
-
-    /* Should never reach here */
-    panic("sys_exit returned");
+    /* Process is now ZOMBIE. Return here so the syscall handler's
+     * `return schedule(frame)` performs the actual context switch. */
   }
 }
 
@@ -354,7 +364,7 @@ struct pt_regs *syscall_handler(struct pt_regs *frame) {
   {
     struct cpu_info *cpu = get_cpu_info();
     char *k_title = cpu->syscall_buf;
-    if (copy_string_from_user(k_title, (const char *)arg4, 64) != 0) {
+    if (arch_copy_string_from_user(k_title, (const char *)arg4, 64) != 0) {
       frame->regs[0] = -1;
       break;
     }
@@ -388,7 +398,7 @@ struct pt_regs *syscall_handler(struct pt_regs *frame) {
   {
     struct cpu_info *cpu = get_cpu_info();
     char *k_path = cpu->syscall_buf;
-    if (copy_string_from_user(k_path, (const char *)arg0, 128) != 0) {
+    if (arch_copy_string_from_user(k_path, (const char *)arg0, 128) != 0) {
       frame->regs[0] = -1;
       break;
     }
@@ -452,7 +462,7 @@ struct pt_regs *syscall_handler(struct pt_regs *frame) {
   {
     struct cpu_info *cpu = get_cpu_info();
     char *k_path = cpu->syscall_buf;
-    if (copy_string_from_user(k_path, (const char *)arg0, 128) != 0) {
+    if (arch_copy_string_from_user(k_path, (const char *)arg0, 128) != 0) {
       frame->regs[0] = -1;
       break;
     }
@@ -464,7 +474,7 @@ struct pt_regs *syscall_handler(struct pt_regs *frame) {
       break;
     }
 
-    if (copy_from_user(k_buf, (const void *)arg1, size) != 0) {
+    if (arch_copy_from_user(k_buf, (const void *)arg1, size) != 0) {
       kfree(k_buf);
       frame->regs[0] = -1;
       break;
@@ -477,7 +487,7 @@ struct pt_regs *syscall_handler(struct pt_regs *frame) {
   case 252: /* FILE_READ */
   {
     char k_path[128];
-    if (copy_string_from_user(k_path, (const char *)arg0, 128) != 0) {
+    if (arch_copy_string_from_user(k_path, (const char *)arg0, 128) != 0) {
       frame->regs[0] = -1;
       break;
     }
@@ -493,7 +503,7 @@ struct pt_regs *syscall_handler(struct pt_regs *frame) {
     int bytes_read = ext4_read_file(k_path, k_buf, (uint32_t)size, offset);
 
     if (bytes_read >= 0) {
-      if (copy_to_user((void *)arg1, k_buf, bytes_read) != 0) {
+      if (arch_copy_to_user((void *)arg1, k_buf, bytes_read) != 0) {
         bytes_read = -1;
       }
     }

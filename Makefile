@@ -81,6 +81,7 @@ KERN_ASM_SOURCES = \
 KERN_C_SOURCES = \
     $(ARCH_DIR)/cpu/cpu.c \
     $(ARCH_DIR)/cpu/syscall.c \
+    $(ARCH_DIR)/platform.c \
     $(KERNEL_DIR)/drivers/uart/pl011.c \
     $(KERNEL_DIR)/drivers/gic/gic.c \
     $(KERNEL_DIR)/drivers/timer/timer.c \
@@ -98,9 +99,11 @@ KERN_C_SOURCES = \
     $(KERNEL_DIR)/lib/printk.c \
     $(KERNEL_DIR)/lib/stack_protector.c \
     $(KERNEL_DIR)/lib/math.c \
-    $(KERNEL_DIR)/lib/math.c \
     $(KERNEL_DIR)/lib/kmalloc.c \
     $(KERNEL_DIR)/lib/registry.c \
+    $(KERNEL_DIR)/lib/ktest.c \
+    $(KERNEL_DIR)/lib/ktest_samples.c \
+    $(KERNEL_DIR)/cpu.c \
     $(KERNEL_DIR)/sched/process.c \
     $(KERNEL_DIR)/sched/elf.c \
     $(KERNEL_DIR)/graphics/graphics.c \
@@ -108,6 +111,7 @@ KERN_C_SOURCES = \
     $(KERNEL_DIR)/graphics/gl.c \
     $(KERNEL_DIR)/graphics/font.c \
     $(KERNEL_DIR)/graphics/compositor.c \
+    $(KERNEL_DIR)/irq/irq.c \
     $(KERNEL_DIR)/main.c
 
 KERN_CPP_SOURCES = \
@@ -161,6 +165,7 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/lib
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/sched
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/graphics
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/irq
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/lib
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/bin
 

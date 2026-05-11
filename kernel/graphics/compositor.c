@@ -55,6 +55,23 @@ static int next_window_id = 100;
 static volatile int compositor_dirty = 1;
 static DEFINE_SPINLOCK(compositor_lock);
 
+/* Damage rect: tracks the bounding box of pixels that need GPU upload */
+static int damage_x1 = 0, damage_y1 = 0;
+static int damage_x2 = 0, damage_y2 = 0;
+
+/* Helper to expand damage region */
+static void expand_damage(int x, int y, int w, int h) {
+  if (x < damage_x1)
+    damage_x1 = x;
+  if (y < damage_y1)
+    damage_y1 = y;
+  if (x + w > damage_x2)
+    damage_x2 = x + w;
+  if (y + h > damage_y2)
+    damage_y2 = y + h;
+  compositor_dirty = 1;
+}
+
 /* Pre-allocated buffers for rendering to avoid stack usage and kmalloc in IRQ
  */
 static struct window *sorted_windows[MAX_WINDOWS];
@@ -91,6 +108,10 @@ void compositor_init(void) {
   bb_width = 720;
   bb_height = 1280;
   compositor_backbuffer = kmalloc(bb_width * bb_height * 4);
+
+  /* Initialize damage rect to full screen so the first frame is fully uploaded */
+  damage_x1 = 0; damage_y1 = 0;
+  damage_x2 = bb_width; damage_y2 = bb_height;
   if (!compositor_backbuffer) {
     pr_err("%s", "Compositor: Failed to allocate backbuffer!\n");
   }
@@ -102,6 +123,7 @@ void compositor_init(void) {
 static void compositor_render_internal(void);
 static void draw_rect_internal(int window_id, int x, int y, int w, int h,
                                uint32_t color, int caller_pid);
+
 
 /*
  * Create Window
@@ -534,7 +556,9 @@ void compositor_window_write(int win_id, const char *buf, size_t count) {
     }
   }
 
-  /* Mark compositor as needing redraw */
+  /* Mark compositor as needing redraw (window area including title bar) */
+  expand_damage(win->x, win->y - TITLE_BAR_HEIGHT,
+                win->width, win->height + TITLE_BAR_HEIGHT);
   compositor_dirty = 1;
   spin_unlock_irqrestore(&compositor_lock, flags);
 }
@@ -550,19 +574,16 @@ void compositor_handle_click(int button, int state) {
   (void)button;
 
   if (state == 0) {
-    /* Release - Stop dragging */
     dragging_window_id = -1;
     return;
   }
 
-  if (state != 1) /* Only handle press down */
+  if (state != 1)
     return;
 
-  /* Debug click */
-  /* pr_info("Click: %d, %d\n", mouse_x, mouse_y); */
+  uint64_t flags;
+  spin_lock_irqsave(&compositor_lock, &flags);
 
-  /* Check for window hit - include title bar area (y - TITLE_BAR_HEIGHT to y +
-   * height) */
   struct window *hit = NULL;
   int max_z = -1;
 
@@ -570,7 +591,8 @@ void compositor_handle_click(int button, int state) {
     if (windows[i].id != 0 && windows[i].visible) {
       int title_top = windows[i].y - TITLE_BAR_HEIGHT;
       if (mouse_x >= windows[i].x &&
-          mouse_x < windows[i].x + windows[i].width && mouse_y >= title_top &&
+          mouse_x < windows[i].x + windows[i].width &&
+          mouse_y >= title_top &&
           mouse_y < windows[i].y + windows[i].height) {
         if (windows[i].z_order > max_z) {
           max_z = windows[i].z_order;
@@ -580,43 +602,51 @@ void compositor_handle_click(int button, int state) {
     }
   }
 
-  if (hit) {
-    /* Bring to front */
-    int top_z = 0;
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-      if (windows[i].id != 0 && windows[i].z_order > top_z)
-        top_z = windows[i].z_order;
-    }
-    hit->z_order = top_z + 1;
-
-    /* Check for close button click */
-    if (!hit->protected) {
-      int btn_x = hit->x + hit->width - CLOSE_BUTTON_SIZE - 2;
-      int btn_y = hit->y - TITLE_BAR_HEIGHT + 2;
-      if (mouse_x >= btn_x && mouse_x < btn_x + CLOSE_BUTTON_SIZE &&
-          mouse_y >= btn_y && mouse_y < btn_y + CLOSE_BUTTON_SIZE) {
-        pr_info("Compositor: Close button clicked on window %d (PID %d)\n",
-                hit->id, hit->pid);
-        /* Terminate the owning process */
-        extern int process_terminate(int pid);
-        process_terminate(hit->pid);
-        /* Destroy the window */
-        compositor_destroy_window(hit->id);
-        compositor_dirty = 1;
-        compositor_render();
-        return;
-      }
-    }
-
-    /* Check for drag start (Title bar area) */
-    if (mouse_y >= hit->y - TITLE_BAR_HEIGHT && mouse_y < hit->y) {
-      dragging_window_id = hit->id;
-      drag_off_x = mouse_x - hit->x;
-      drag_off_y = mouse_y - hit->y;
-    }
-
-    compositor_render();
+  if (!hit) {
+    spin_unlock_irqrestore(&compositor_lock, flags);
+    return;
   }
+
+  /* Bring to front */
+  int top_z = 0;
+  for (int i = 0; i < MAX_WINDOWS; i++) {
+    if (windows[i].id != 0 && windows[i].z_order > top_z)
+      top_z = windows[i].z_order;
+  }
+  hit->z_order = top_z + 1;
+
+  /* Check for close button — save pid/id, release lock before process_terminate */
+  if (!hit->protected) {
+    int btn_x = hit->x + hit->width - CLOSE_BUTTON_SIZE - 2;
+    int btn_y = hit->y - TITLE_BAR_HEIGHT + 2;
+    if (mouse_x >= btn_x && mouse_x < btn_x + CLOSE_BUTTON_SIZE &&
+        mouse_y >= btn_y && mouse_y < btn_y + CLOSE_BUTTON_SIZE) {
+      int close_pid = hit->pid;
+      int close_id  = hit->id;
+      spin_unlock_irqrestore(&compositor_lock, flags);
+
+      pr_info("Compositor: Close button PID %d window %d\n", close_pid, close_id);
+      /* process_terminate calls compositor_destroy_windows_by_pid internally */
+      extern int process_terminate(int pid);
+      process_terminate(close_pid);
+
+      /* Mark dirty — compositor_tick will re-render on next timer tick */
+      expand_damage(0, 0, bb_width, bb_height);
+      compositor_dirty = 1;
+      return;
+    }
+  }
+
+  /* Check for drag start */
+  if (mouse_y >= hit->y - TITLE_BAR_HEIGHT && mouse_y < hit->y) {
+    dragging_window_id = hit->id;
+    drag_off_x = mouse_x - hit->x;
+    drag_off_y = mouse_y - hit->y;
+  }
+
+  expand_damage(0, 0, bb_width, bb_height);
+  compositor_dirty = 1;
+  spin_unlock_irqrestore(&compositor_lock, flags);
 }
 
 /*
@@ -632,6 +662,8 @@ void compositor_update_mouse(int dx, int dy, int absolute) {
     width = dev->width;
     height = dev->height;
   }
+
+  int old_mx = mouse_x, old_my = mouse_y;
 
   if (absolute) {
     mouse_x = dx;
@@ -672,6 +704,13 @@ void compositor_update_mouse(int dx, int dy, int absolute) {
   }
 
   /* Mark compositor as needing redraw - don't render from IRQ! */
+  if (dragging_window_id != -1) {
+    expand_damage(0, 0, bb_width, bb_height);
+  } else {
+    /* Only the old and new cursor areas (12x16 + 1px border) */
+    expand_damage(old_mx - 1, old_my - 1, 14, 18);
+    expand_damage(mouse_x - 1, mouse_y - 1, 14, 18);
+  }
   compositor_dirty = 1;
 }
 
@@ -765,7 +804,6 @@ static void compositor_render_internal(void) {
   }
 
   /* Iterate Top-to-Bottom for Occlusion */
-  /* Iterate Top-to-Bottom for Occlusion */
   for (int i = count - 1; i >= 0 && i < MAX_WINDOWS; i--) {
     struct window *win = sorted[i];
 
@@ -809,12 +847,16 @@ static void compositor_render_internal(void) {
         for (int x = 0; x < bg->w; x++) {
           int sy = bg->y + y;
           int sx = bg->x + x;
-          /* Proper Gradient Background */
+          
+          /* Final backbuffer bounds safety check */
+          if (sx >= 0 && sx < bb_w && sy >= 0 && sy < bb_h) {
+            /* Proper Gradient Background */
           uint32_t r_chk = 20;
           uint32_t g_chk = 40 + (sy * 40 / bb_h);
           uint32_t b_chk = 80 + (sy * 80 / bb_h);
           backbuffer[sy * bb_w + sx] =
               0xFF000000 | (r_chk << 16) | (g_chk << 8) | b_chk;
+          }
         }
       }
     }
@@ -938,12 +980,28 @@ static void compositor_render_internal(void) {
     }
   }
 
-  /* Flush */
+  /* Flush — only upload the damage bounding box instead of the full framebuffer */
   if (dev->ops && dev->ops->flush && dev->ops->get_framebuffer) {
     void *fb_va = dev->ops->get_framebuffer(dev, NULL);
     if (fb_va) {
-      memcpy(fb_va, backbuffer, bb_w * bb_h * 4);
-      dev->ops->flush(dev, 0, 0, bb_w, bb_h);
+      int dx1 = damage_x1 < 0 ? 0 : damage_x1;
+      int dy1 = damage_y1 < 0 ? 0 : damage_y1;
+      int dx2 = damage_x2 > bb_w ? bb_w : damage_x2;
+      int dy2 = damage_y2 > bb_h ? bb_h : damage_y2;
+      if (dx1 < dx2 && dy1 < dy2) {
+        int row_bytes = (dx2 - dx1) * 4;
+        uint8_t *dst = (uint8_t *)fb_va;
+        const uint8_t *src = (const uint8_t *)backbuffer;
+        for (int row = dy1; row < dy2; row++) {
+          memcpy(dst + ((size_t)row * bb_w + dx1) * 4,
+                 src + ((size_t)row * bb_w + dx1) * 4,
+                 row_bytes);
+        }
+        dev->ops->flush(dev, dx1, dy1, dx2 - dx1, dy2 - dy1);
+      }
+      /* Reset damage: invalid state (x1>x2) means nothing to flush */
+      damage_x1 = bb_w; damage_y1 = bb_h;
+      damage_x2 = 0;    damage_y2 = 0;
     }
   }
 
@@ -1010,6 +1068,9 @@ static void draw_rect_internal(int window_id, int x, int y, int w, int h,
           }
         }
       }
+      /* Update damage region: Window relative -> Screen relative */
+      int win_y = windows[i].y + (windows[i].top_most ? 0 : TITLE_BAR_HEIGHT);
+      expand_damage(windows[i].x + x, win_y + y, w, h);
       return;
     }
   }
@@ -1075,12 +1136,21 @@ void compositor_blit(int window_id, int x, int y, int w, int h,
         if (copy_w <= 0)
           continue;
 
-        /* Use memcpy */
+        /* Use copy_from_user instead of raw memcpy for security */
         void *dst_ptr = &windows[i].buffer[py * windows[i].width + dest_x];
         const void *src_ptr = &user_buf[dy * w + src_x];
 
-        memcpy(dst_ptr, src_ptr, copy_w * sizeof(uint32_t));
+        if (vmm_copy_from_user(dst_ptr, src_ptr, copy_w * sizeof(uint32_t)) != 0) {
+          /* Page fault or invalid access: abort blit */
+          spin_unlock_irqrestore(&compositor_lock, flags);
+          return;
+        }
       }
+
+      /* Update damage region: Window relative -> Screen relative */
+      int win_y = windows[i].y + (windows[i].top_most ? 0 : TITLE_BAR_HEIGHT);
+      expand_damage(windows[i].x + x, win_y + y, w, h);
+
       spin_unlock_irqrestore(&compositor_lock, flags);
       return;
     }

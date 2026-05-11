@@ -4,7 +4,7 @@
  *
  * Uses EL1 virtual timer (CNTV) - works in QEMU -kernel mode
  */
-#include <drivers/gic.h>
+#include <kernel/irq.h>
 #include <drivers/timer.h>
 #include <kernel/arch.h>
 #include <kernel/cpu.h>
@@ -25,7 +25,7 @@ uint64_t timer_freq;
 /* Compositor refresh interval (jiffies) */
 static uint64_t compositor_interval =
     1; /* Default to every tick if init fails */
-#define COMPOSITOR_TARGET_FPS 60
+#define COMPOSITOR_TARGET_FPS 30
 
 /* System tick counter */
 volatile uint64_t jiffies = 0;
@@ -37,25 +37,25 @@ static spinlock_t timer_lock = SPINLOCK_INIT;
 /*
  * Read counter frequency
  */
-static inline uint64_t read_cntfrq(void) { return arch_cntfrq_el0_read(); }
+static inline uint64_t read_cntfrq(void) { return arch_timer_get_freq(); }
 
 /*
  * Read virtual counter
  */
-static inline uint64_t read_cntvct(void) { return arch_cntvct_el0_read(); }
+static inline uint64_t read_cntvct(void) { return arch_timer_get_count(); }
 
 /*
  * Set virtual timer compare value (EL1 virtual timer)
  */
 static inline void write_cntv_cval(uint64_t val) {
-  arch_cntv_cval_el0_write(val);
+  arch_timer_set_compare(val);
 }
 
 /*
  * Set virtual timer control (EL1 virtual timer)
  */
 static inline void write_cntv_ctl(uint64_t val) {
-  arch_cntv_ctl_el0_write(val);
+  arch_timer_control(val);
 }
 
 /*
@@ -64,7 +64,16 @@ static inline void write_cntv_ctl(uint64_t val) {
  */
 extern void compositor_tick(void);
 
+/* Global panic flag set by panic() to halt all CPUs */
+extern volatile int panic_flag;
+
 struct pt_regs *timer_handler(struct pt_regs *regs) {
+  /* Halt this CPU if another CPU panicked */
+  if (panic_flag) {
+    write_cntv_ctl(0); /* Disable timer */
+    arch_cpu_halt();
+  }
+
   struct cpu_info *cpu = get_cpu_info();
   cpu->tick_count++;
 
@@ -182,7 +191,7 @@ void timer_init(void) {
 
   /* Register virtual timer interrupt (IRQ 27 on QEMU virt) */
   /* We handle IRQ 27 explicitly in gic.c dispatch to pass regs */
-  gic_enable_irq(IRQ_TIMER_VIRT);
+  irq_enable(IRQ_TIMER);
 }
 
 /*
@@ -202,11 +211,11 @@ void timer_init_percpu(void) {
   write_cntv_ctl(1);
 
   /* Enable virtual timer IRQ in GIC (PPI, already per-CPU) */
-  gic_enable_irq(IRQ_TIMER_VIRT);
+  irq_enable(IRQ_TIMER);
 
   pr_info("Timer: Per-CPU virtual timer enabled (IRQ %d). Next: 0x%lx, Ctl: "
           "0x1\n",
-          IRQ_TIMER_VIRT, cpu->next_tick_target);
+          IRQ_TIMER, cpu->next_tick_target);
 }
 
 /*

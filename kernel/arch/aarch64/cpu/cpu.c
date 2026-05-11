@@ -2,7 +2,6 @@
  * kernel/arch/aarch64/cpu/cpu.c
  * CPU and exception handling for AArch64
  */
-#include <drivers/gic.h>
 #include <kernel/printk.h>
 #include <kernel/types.h>
 
@@ -13,39 +12,18 @@
 #include <kernel/arch.h>
 #include <kernel/vmm.h>
 
-/* CPU info array (max 8 CPUs) */
-struct cpu_info cpu_data[8];
-uint32_t nr_cpus = 0;
+/* External definitions from core */
+extern struct cpu_info cpu_data[8];
+extern uint32_t nr_cpus;
 
 /* External functions from assembly */
 extern void exception_vectors_install(void);
 
 /*
- * Get current CPU ID
+ * Initialize CPU subsystem (HAL implementation)
  */
-uint32_t cpu_id(void) { return arch_get_cpu_id(); }
-
-/*
- * Get current CPU info
- */
-struct cpu_info *get_cpu_info(void) {
-  uint32_t id = cpu_id();
-  if (id >= 8) {
-    /* Manual panic to avoid infinite recursion if panic uses get_cpu_info logic
-     */
-    /* Just hang or try to output something simple */
-    /* uart_puts("CRITICAL: CPU ID OUT OF BOUNDS!\n"); */
-    while (1) {
-    }
-  }
-  return &cpu_data[id];
-}
-
-/*
- * Initialize CPU subsystem
- */
-void cpu_init(void) {
-  uint32_t id = cpu_id();
+void arch_cpu_init(void) {
+  uint32_t id = arch_get_cpu_id();
 
   cpu_data[id].cpu_id = id;
   cpu_data[id].online = 1;
@@ -63,12 +41,12 @@ void cpu_init(void) {
   uint64_t cpacr = arch_get_cpacr();
   cpacr |= (3 << 20); /* FPEN bits [21:20] = 0b11 */
   arch_set_cpacr(cpacr);
-  arch_isb();
+  arch_instr_barrier();
 
   /* Install exception vector table */
   exception_vectors_install();
 
-  pr_info("CPU: VBAR_EL1 set to 0x%lx\n", arch_get_vbar());
+  pr_info("CPU: Vector Table set to 0x%lx\n", arch_get_vector_table());
 }
 
 /*
@@ -122,9 +100,9 @@ struct pt_regs *sync_handler(struct pt_regs *frame) {
     if (is_user_fault || is_kernel_user_access_fault) {
       pr_err("[ERROR] KERNEL-USER FAULT: EC=0x%lx (0x%lx) FAR=0x%lx ELR=0x%lx PID=%d\n",
              (uint64_t)ec, esr, far, elr, current_process->pid);
-      pr_err("[DEBUG] Context: x0=0x%lx x1=0x%lx x2=0x%lx x3=0x%lx sp=0x%lx\n",
+      pr_err("[DEBUG] Context: x0=0x%lx x1=0x%lx x2=0x%lx x3=0x%lx sp=0x%lx spsr=0x%lx\n",
              frame->regs[0], frame->regs[1], frame->regs[2], frame->regs[3],
-             frame->sp_el0);
+             frame->sp_el0, frame->spsr);
       pr_err("Terminating PID %d\n", current_process->pid);
       
       if (elr == 0) {
@@ -158,6 +136,10 @@ struct pt_regs *sync_handler(struct pt_regs *frame) {
 
     if (elr == 0) {
         pr_err("%s", "CRITICAL: Kernel jumped to NULL! Check exception vector table and function pointers.\n");
+        pr_err("Stack at 0x%lx:\n", (uint64_t)frame);
+        for (int i = 0; i < 8; i++) {
+            pr_err("  [%p] 0x%016lx\n", (void*)&((uint64_t*)frame)[i*2], ((uint64_t*)frame)[i*2]);
+        }
     }
 
     for (int i = 0; i < 31; i += 2) {
@@ -177,38 +159,20 @@ struct pt_regs *sync_handler(struct pt_regs *frame) {
 }
 
 /*
- * System error handler
+ * Get kernel stack for a given CPU
  */
-struct pt_regs *serror_handler(struct pt_regs *frame) {
-  pr_err("SError at ELR=0x%016lx ESR=0x%016lx\n", frame->elr, arch_get_esr());
-  panic("SError exception");
+extern char __kernel_stack[];
+void *arch_get_kernel_stack(uint32_t cpu_id) {
+    /* Each CPU gets 128KB stack */
+    return (void *)&__kernel_stack[cpu_id * 131072];
 }
 
 /*
- * Syscall handler is defined in syscall.c
+ * Set PGD for secondary CPUs (used during boot)
  */
-extern struct pt_regs *syscall_handler(struct pt_regs *frame);
-
-/*
- * Enable interrupts (only IRQ, keep SError masked)
- */
-void local_irq_enable(void) { arch_local_irq_enable(); }
-
-/*
- * Disable interrupts
- */
-void local_irq_disable(void) { arch_local_irq_disable(); }
-
-/*
- * Save and disable interrupts
- */
-uint64_t local_irq_save(void) {
-  uint64_t flags;
-  arch_local_irq_save(&flags);
-  return flags;
+extern uint64_t secondary_ttbr0;
+void arch_vmm_set_secondary_pgd(uint64_t pgd) {
+    secondary_ttbr0 = pgd;
+    arch_cache_clean_va(&secondary_ttbr0);
+    arch_data_barrier();
 }
-
-/*
- * Restore interrupt state
- */
-void local_irq_restore(uint64_t flags) { arch_local_irq_restore(flags); }

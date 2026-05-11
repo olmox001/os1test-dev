@@ -111,7 +111,7 @@ int process_load_elf(struct process *proc, const char *path) {
         if (phdr.p_flags & PF_X) {
           for (uint64_t line = 0; line < 4096; line += 64) {
             uint64_t target = (uint64_t)kaddr + line;
-            arch_clean_cache_va_pou((void *)target);
+            arch_cache_clean_pou((void *)target);
           }
         }
       }
@@ -159,14 +159,14 @@ int process_load_elf(struct process *proc, const char *path) {
     pr_info("ELF:   SPSR=0x%lx\n", proc->context->spsr); */
 
     /* CRITICAL: Flush the register frame to PoC so the scheduled CPU sees it */
-    arch_clean_cache_range_va(proc->context, sizeof(struct pt_regs));
+    arch_cache_clean_range(proc->context, sizeof(struct pt_regs));
   } else {
     pr_err("%s", "ELF: proc->context is NULL!\n");
   }
 
-  /* Flush I-Cache to ensure we execute what we just wrote */
-  arch_dsb();
-  arch_isb();
+  /* Ensure context is visible before enqueueing */
+  arch_data_barrier();
+  arch_instr_barrier();
 
   return 0;
 }
