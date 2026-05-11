@@ -338,6 +338,7 @@ int process_terminate(int pid) {
 
   /* If we are terminating OURSELVES */
   if (current_process == proc) {
+    pr_err("SCHED: PID %d going ZOMBIE (self-terminate)\n", pid);
     proc->state = PROC_ZOMBIE;
 
     /* If this is a user process without a parent or it is a system-level init,
@@ -363,6 +364,7 @@ int process_terminate(int pid) {
     }
   }
 
+  pr_err("SCHED: PID %d going DEAD (external terminate)\n", pid);
   proc->state = PROC_DEAD;
 
   if (proc->on_cpu >= 0) {
@@ -501,7 +503,7 @@ struct pt_regs *schedule(struct pt_regs *regs) {
         /* Never re-enqueue the CPU-bound idle task. It must stay out of the
          * runqueue to prevent work-stealing: two CPUs sharing one idle task's
          * kernel stack causes context corruption (ELR=0 crashes). */
-        if (prev != cpu_ptr->idle_task) {
+        if (prev->priority != PROC_PRIO_IDLE) {
           __enqueue_task(prev);
         }
       } else {
@@ -561,10 +563,10 @@ found:
             struct list_head *entry = other_cpu->runqueues[p].next;
             next = container_of(entry, struct process, run_list);
 
-            /* Never steal idle tasks — they are CPU-bound and share a kernel
-             * stack with their owner CPU. Stealing causes two CPUs to run the
-             * same kernel stack simultaneously, corrupting context (ELR=0). */
-            if (next == other_cpu->idle_task) {
+            /* Never steal idle-priority tasks — they are CPU-bound and share a
+             * kernel stack with their owner CPU. Check priority, not pointer,
+             * so this also catches any idle task that migrated via wake_up. */
+            if (next->priority == PROC_PRIO_IDLE) {
               next = NULL;
               spin_unlock(&other_cpu->sched_lock);
               continue;
