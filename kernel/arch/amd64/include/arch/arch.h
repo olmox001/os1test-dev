@@ -297,6 +297,8 @@ static inline void __arch_set_sctlr(uint64_t v) {
   __asm__ __volatile__("mov %0, %%cr0" ::"r"(v) : "memory");
 }
 
-#define ARCH_MEMORY_BASE 0x0UL
+#define __ARCH_RAM_START 0x0UL
+#define __ARCH_RAM_SIZE  0x40000000UL /* 1GB */
+#define __ARCH_ALIAS_OFFSET 0x0UL      /* identity only for now */
 
 #endif /* _ARCH_AMD64_H */

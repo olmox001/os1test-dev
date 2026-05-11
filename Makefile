@@ -139,6 +139,7 @@ KERN_ASM_SOURCES = \
 KERN_C_SOURCES = \
     $(ARCH_DIR)/cpu/cpu.c \
     $(ARCH_DIR)/cpu/syscall.c \
+    $(ARCH_DIR)/mm/mmu.c \
     $(ARCH_DIR)/platform.c \
     $(KERNEL_DIR)/drivers/uart/pl011.c \
     $(KERNEL_DIR)/drivers/gic/gic.c \

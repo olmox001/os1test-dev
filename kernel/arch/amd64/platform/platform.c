@@ -60,8 +60,9 @@ void arch_platform_early_init(void) {
   /* Interrupts will be enabled at the end of kernel_main */
 
   if (mb_info_ptr == 0) {
-    pr_err("Multiboot2 info missing!\n");
-    __arch_cpu_halt();
+    pr_warn("Multiboot2 info missing! Proceeding with fallback (128MB RAM).\n");
+    pmm_init_region(0x1000000, 128UL * 1024 * 1024 - 0x1000000);
+    return;
   }
 
   uint8_t *mb_data = (uint8_t *)(uint64_t)mb_info_ptr;

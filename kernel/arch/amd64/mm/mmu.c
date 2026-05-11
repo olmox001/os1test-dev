@@ -38,6 +38,27 @@ uint64_t arch_vmm_get_physical(uint64_t pgd, uint64_t va);
 
 extern uint64_t boot_pml4[];
 
+void arch_vmm_init_hw(uint64_t kernel_pgd) {
+  /* Switch to the new kernel PML4 */
+  arch_vmm_set_pgd(kernel_pgd);
+  pr_info("AMD64 VMM: Switched to kernel PGD at %p\n", (void *)kernel_pgd);
+}
+
+void arch_vmm_map_mmio(uint64_t *pgd) {
+  /* 1. Identity Map LAPIC (0xFEE00000) and IOAPIC (0xFEC00000) */
+  /* These are essential for interrupt handling on x86-64 */
+  for (uint64_t addr = 0xFEC00000UL; addr < 0xFF000000UL; addr += 4096) {
+    arch_vmm_map((uint64_t)pgd, addr, addr, X86_PTE_P | X86_PTE_RW);
+  }
+
+  /* 2. Identity Map VirtIO MMIO range (0x08000000 to 0x0A800000) */
+  /* This matches the QEMU 'virt' platform used by the common drivers.
+   * On x86, this might overlap with RAM, so we only map it to avoid faults during probe. */
+  for (uint64_t addr = 0x08000000UL; addr < 0x0A800000UL; addr += 4096) {
+    arch_vmm_map((uint64_t)pgd, addr, addr, X86_PTE_P | X86_PTE_RW);
+  }
+}
+
 void arch_vmm_init(void) {
   /* Boot PML4 is already set up with identity map by boot.S */
   pr_info("AMD64 VMM initialized (PML4 @ %p)\n", (void *)boot_pml4);
@@ -192,5 +213,52 @@ int arch_vmm_protect(uint64_t pgd, uint64_t va, uint64_t size, uint64_t flags) {
   (void)va;
   (void)size;
   (void)flags;
+  return 0;
+}
+
+int arch_vmm_map_range(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t size, uint64_t flags) {
+  uint64_t v = va;
+  uint64_t p = pa;
+  uint64_t end = va + size;
+
+  while (v < end) {
+    uint64_t remaining = end - v;
+    
+    if ((v & 0x1FFFFF) == 0 && (p & 0x1FFFFF) == 0 && remaining >= 0x200000) {
+      uint64_t *pml4 = (uint64_t *)pgd;
+      
+      int pml4_idx = PML4_INDEX(v);
+      if (!(pml4[pml4_idx] & X86_PTE_P)) {
+        uint64_t new_pdpt = (uint64_t)pmm_alloc_page();
+        if (!new_pdpt) return -1;
+        memset((void *)new_pdpt, 0, PAGE_SIZE);
+        pml4[pml4_idx] = new_pdpt | X86_PTE_P | X86_PTE_RW | X86_PTE_US;
+      }
+      uint64_t *pdpt = (uint64_t *)(pml4[pml4_idx] & PTE_ADDR_MASK);
+
+      int pdpt_idx = PDPT_INDEX(v);
+      if (!(pdpt[pdpt_idx] & X86_PTE_P)) {
+        uint64_t new_pd = (uint64_t)pmm_alloc_page();
+        if (!new_pd) return -1;
+        memset((void *)new_pd, 0, PAGE_SIZE);
+        pdpt[pdpt_idx] = new_pd | X86_PTE_P | X86_PTE_RW | X86_PTE_US;
+      }
+      uint64_t *pd = (uint64_t *)(pdpt[pdpt_idx] & PTE_ADDR_MASK);
+
+      /* Level 2 2MB Page Mapping */
+      uint64_t x86_flags = X86_PTE_P | 0x080; /* PS bit for 2MB */
+      if (flags & PTE_USER) x86_flags |= X86_PTE_US;
+      if (!(flags & PTE_RO)) x86_flags |= X86_PTE_RW;
+
+      pd[PD_INDEX(v)] = (p & PTE_ADDR_MASK) | x86_flags;
+      v += 0x200000;
+      p += 0x200000;
+    } else {
+      if (arch_vmm_map(pgd, v, p, flags) != 0) return -1;
+      v += 4096;
+      p += 4096;
+    }
+  }
+  __arch_tlb_flush_all();
   return 0;
 }

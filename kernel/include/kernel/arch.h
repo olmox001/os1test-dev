@@ -52,6 +52,15 @@ int arch_copy_string_from_user(char *dest, const char *src, size_t max_len);
 #define arch_data_barrier()  arch_mb()
 
 /* --- Memory Management (VMM/TLB/Cache) --- */
+void arch_vmm_init_hw(uint64_t kernel_pgd);
+void arch_vmm_map_mmio(uint64_t *pgd);
+int arch_vmm_map(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t flags);
+int arch_vmm_map_range(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t size, uint64_t flags);
+int arch_vmm_unmap(uint64_t pgd, uint64_t va);
+
+#define ARCH_RAM_START __ARCH_RAM_START
+#define ARCH_RAM_SIZE  __ARCH_RAM_SIZE
+#define ARCH_ALIAS_OFFSET __ARCH_ALIAS_OFFSET
 /* Set Page Directory Base (CR3 on x86, TTBR0/1 on ARM) */
 #define arch_vmm_set_pgd(v) __arch_set_ttbr0(v)
 #define arch_vmm_get_pgd() __arch_get_ttbr0()

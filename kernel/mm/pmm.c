@@ -5,7 +5,7 @@
 #include <kernel/string.h>
 
 /* Memory configuration from architecture */
-#define MEMORY_BASE ARCH_MEMORY_BASE
+#define MEMORY_BASE ARCH_RAM_START
 #define DMA_ZONE_END (MEMORY_BASE + 0x1000000UL) /* 16MB for DMA zone */
 
 /* Maximum supported memory (1GB for now) */
