@@ -11,13 +11,7 @@
 #include <kernel/string.h>
 #include <kernel/vmm.h>
 
-/* Helper macros for MMIO usage */
-#define VIRTIO_REG(base, offset)                                               \
-  ((volatile uint32_t *)((uint64_t)(base) + (offset)))
-#define VIRTIO_READ(base, offset) (*VIRTIO_REG(base, offset))
-#define VIRTIO_WRITE(base, offset, val) (*VIRTIO_REG(base, offset) = (val))
-
-static uint64_t virtio_blk_base = 0;
+static uintptr_t virtio_blk_base = 0;
 static uint32_t virtio_blk_qsize = 0;
 
 /* Vring structures */
@@ -31,107 +25,79 @@ static struct vring_used *used;
 void virtio_blk_init(void) {
   pr_info("%s", "VirtIO: Probing for block device...\n");
 
-  for (int i = 0; i < VIRTIO_COUNT; i++) {
-    uint64_t base = VIRTIO_MMIO_BASE + i * VIRTIO_MMIO_STRIDE;
+  uintptr_t base = 0;
+  uint32_t irq = 0;
 
-    uint32_t magic = VIRTIO_READ(base, VIRTIO_MMIO_MAGIC_VALUE);
-    if (magic != 0x74726976) { /* "virt" */
-      continue;
-    }
-
-    uint32_t device_id = VIRTIO_READ(base, VIRTIO_MMIO_DEVICE_ID);
-    if (device_id == 0) {
-      continue; /* Placeholder */
-    }
-
-    if (device_id == VIRTIO_DEV_BLOCK) {
-      pr_info("VirtIO: Found Block Device at 0x%08lx\n", base);
-      virtio_blk_base = base;
-
-      uint32_t version = VIRTIO_READ(base, VIRTIO_MMIO_VERSION);
-      pr_info("VirtIO: Version %d\n", version);
-
-      /* 1. Reset */
-      VIRTIO_WRITE(base, VIRTIO_MMIO_STATUS, 0);
-
-      /* 2. Set ACKNOWLEDGE and DRIVER */
-      uint32_t status = VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER;
-      VIRTIO_WRITE(base, VIRTIO_MMIO_STATUS, status);
-
-      /* 3. Negotiate features */
-      uint32_t features = VIRTIO_READ(base, VIRTIO_MMIO_DEVICE_FEATURES);
-      VIRTIO_WRITE(base, VIRTIO_MMIO_DRIVER_FEATURES, features);
-
-      /* 4. Set FEATURES_OK (Only for Version 2, but harmless/ignored on V1) */
-      if (version >= 2) {
-        status |= VIRTIO_STATUS_FEATURES_OK;
-        VIRTIO_WRITE(base, VIRTIO_MMIO_STATUS, status);
-        if (!(VIRTIO_READ(base, VIRTIO_MMIO_STATUS) &
-              VIRTIO_STATUS_FEATURES_OK)) {
-          pr_info("%s", "VirtIO: Feature negotiation failed\n");
-          return;
-        }
-      }
-
-      /* 5. Initialize Queue 0 */
-      VIRTIO_WRITE(base, VIRTIO_MMIO_QUEUE_SEL, 0);
-
-      uint32_t qmax = VIRTIO_READ(base, VIRTIO_MMIO_QUEUE_NUM_MAX);
-      if (qmax == 0) {
-        pr_info("%s", "VirtIO: Queue 0 not available\n");
-        return;
-      }
-
-      /* Use 16 descriptors (must be power of 2, <= qmax) */
-      uint32_t qsize = 16;
-      if (qsize > qmax)
-        qsize = qmax;
-      virtio_blk_qsize = qsize;
-
-      VIRTIO_WRITE(base, VIRTIO_MMIO_QUEUE_NUM, qsize);
-
-      if (version == 1) {
-        /* Legacy: Set Page Size and PFN */
-        VIRTIO_WRITE(base, VIRTIO_MMIO_GUEST_PAGE_SIZE, 4096);
-
-        void *qmem = pmm_alloc_pages(2);
-        if (!qmem) {
-          pr_info("%s", "VirtIO: Failed to alloc 2 pages\n");
-          return;
-        }
-        memset(qmem, 0, 4096 * 2);
-
-        /* Map rings as non-cacheable */
-        extern uint64_t *kernel_pgd;
-        vmm_map_page(kernel_pgd, (uint64_t)qmem, (uint64_t)qmem, PAGE_DEVICE);
-        vmm_map_page(kernel_pgd, (uint64_t)qmem + 4096, (uint64_t)qmem + 4096,
-                     PAGE_DEVICE);
-
-        uint64_t q_phys = (uint64_t)qmem;
-        VIRTIO_WRITE(base, VIRTIO_MMIO_QUEUE_PFN, q_phys >> 12);
-
-        desc = (struct vring_desc *)qmem;
-        avail = (struct vring_avail *)((uint8_t *)qmem + qsize * 16);
-        used = (struct vring_used *)((uint8_t *)qmem + 4096);
-
-        pr_info("VirtIO: Queue 0 setup (Legacy). Desc: %p, Used: %p\n",
-                (void *)desc, (void *)used);
-
-      } else {
-        pr_info("%s", "VirtIO: Modern not fully implemented yet\n");
-        return;
-      }
-
-      /* 6. Set DRIVER_OK */
-      status |= VIRTIO_STATUS_DRIVER_OK;
-      VIRTIO_WRITE(base, VIRTIO_MMIO_STATUS, status);
-
-      pr_info("%s", "VirtIO: Block Device Initialized\n");
-      return;
-    }
+  if (arch_virtio_probe(VIRTIO_DEV_BLOCK, &base, &irq) == 0) {
+    pr_info("VirtIO: Found Block Device at 0x%016lx (IRQ %u)\n", base, irq);
+    virtio_blk_base = base;
+  } else {
+    pr_info("%s", "VirtIO: No block device found\n");
+    return;
   }
 
-  pr_info("%s", "VirtIO: No block device found\n");
+  /* === Common initialization (Legacy) === */
+  uint32_t version = virtio_read_reg(base, VIRTIO_MMIO_VERSION);
+  pr_info("VirtIO: Version %d\n", version);
+
+  /* Reset device */
+  virtio_write_reg(base, VIRTIO_MMIO_STATUS, 0);
+
+  /* Acknowledge + Driver */
+  uint32_t status = VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER;
+  virtio_write_reg(base, VIRTIO_MMIO_STATUS, status);
+
+  /* Feature negotiation */
+  uint32_t features = virtio_read_reg(base, VIRTIO_MMIO_DEVICE_FEATURES);
+  virtio_write_reg(base, VIRTIO_MMIO_DRIVER_FEATURES, features);
+
+  if (version >= 2) {
+    status |= VIRTIO_STATUS_FEATURES_OK;
+    virtio_write_reg(base, VIRTIO_MMIO_STATUS, status);
+  }
+
+  /* Queue 0 setup */
+  virtio_write_reg(base, VIRTIO_MMIO_QUEUE_SEL, 0);
+  uint32_t qmax = virtio_read_reg(base, VIRTIO_MMIO_QUEUE_NUM_MAX);
+  uint32_t qsize = 16;
+  if (qsize > qmax)
+    qsize = qmax;
+
+  virtio_blk_qsize = qsize;
+  virtio_write_reg(base, VIRTIO_MMIO_QUEUE_NUM, qsize);
+
+  /* Legacy queue setup */
+  if (version == 1) {
+    virtio_write_reg(base, VIRTIO_MMIO_GUEST_PAGE_SIZE, 4096);
+
+    void *qmem = pmm_alloc_pages(2);
+    if (!qmem) {
+      pr_err("%s", "VirtIO: Failed to allocate queue memory\n");
+      return;
+    }
+    memset(qmem, 0, 8192);
+
+    /* Map rings */
+    extern uint64_t *kernel_pgd;
+    vmm_map_page(kernel_pgd, (uint64_t)qmem, (uint64_t)qmem, PAGE_DEVICE);
+    vmm_map_page(kernel_pgd, (uint64_t)qmem + 4096, (uint64_t)qmem + 4096,
+                 PAGE_DEVICE);
+
+    desc = (struct vring_desc *)qmem;
+    avail = (struct vring_avail *)((uint8_t *)qmem + qsize * 16);
+    used = (struct vring_used *)((uint8_t *)qmem + 4096);
+
+    uint64_t q_phys = (uint64_t)qmem;
+    virtio_write_reg(base, VIRTIO_MMIO_QUEUE_PFN, q_phys >> 12);
+
+    pr_info("VirtIO: Queue 0 setup (Legacy). Desc: %p\n", (void *)desc);
+  }
+
+  /* Driver OK */
+  status |= VIRTIO_STATUS_DRIVER_OK;
+  virtio_write_reg(base, VIRTIO_MMIO_STATUS, status);
+
+  pr_info("%s", "VirtIO: Block Device Initialized successfully\n");
 }
 
 /*
@@ -186,7 +152,7 @@ int virtio_blk_read(void *buf, uint64_t sector, uint32_t count) {
   volatile uint16_t *used_idx_ptr = &used->idx;
 
   /* Notify */
-  VIRTIO_WRITE(virtio_blk_base, VIRTIO_MMIO_QUEUE_NOTIFY, 0);
+  virtio_write_reg(virtio_blk_base, VIRTIO_MMIO_QUEUE_NOTIFY, 0);
 
   /* Poll Used Ring (Busy Wait) */
   uint64_t timeout = 1000000;
@@ -247,7 +213,7 @@ int virtio_blk_write(void *buf, uint64_t sector, uint32_t count) {
   avail->idx++;
   arch_data_barrier();
 
-  VIRTIO_WRITE(virtio_blk_base, VIRTIO_MMIO_QUEUE_NOTIFY, 0);
+  virtio_write_reg(virtio_blk_base, VIRTIO_MMIO_QUEUE_NOTIFY, 0);
 
   volatile uint16_t *used_idx_ptr_w = &used->idx;
   uint16_t last_wait_idx_w = *used_idx_ptr_w;

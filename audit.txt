@@ -1,0 +1,292 @@
+--- KERNEL AUDIT REPORT ---
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("dsb in ./include/api/posix_types.h:126
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("dsb in ./include/api/posix_types.h:127
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("dsb in ./include/api/posix_types.h:128
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("isb in ./include/api/posix_types.h:129
+[WARNING] Old/Arch-Specific call found: gic_register in ./kernel/drivers/irq_ctrl.c:5
+[WARNING] Old/Arch-Specific call found: gic_register in ./kernel/drivers/irq_ctrl.c:12
+[WARNING] Old/Arch-Specific call found: gic_regs in ./kernel/drivers/gic/gic_regs.h:2
+[WARNING] Old/Arch-Specific call found: gic_register in ./kernel/include/drivers/gic.h:14
+[WARNING] Old/Arch-Specific call found: gic_register in ./kernel/arch/aarch64/platform.c:18
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("dsb in ./kernel/arch/aarch64/include/arch/arch.h:55
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("dsb in ./kernel/arch/aarch64/include/arch/arch.h:57
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("dsb in ./kernel/arch/aarch64/include/arch/arch.h:58
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("dsb in ./kernel/arch/aarch64/include/arch/arch.h:59
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("tlbi vmalle1 \n dsb in ./kernel/arch/aarch64/include/arch/arch.h:113
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("tlbi vmalle1is \n dsb in ./kernel/arch/aarch64/include/arch/arch.h:117
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("tlbi vaae1is, %0 \n dsb in ./kernel/arch/aarch64/include/arch/arch.h:121
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("isb in ./kernel/arch/aarch64/include/arch/arch.h:54
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("tlbi vmalle1 \n dsb ish \n isb in ./kernel/arch/aarch64/include/arch/arch.h:113
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("tlbi vmalle1is \n dsb ish \n isb in ./kernel/arch/aarch64/include/arch/arch.h:117
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("tlbi vaae1is, %0 \n dsb ish \n isb in ./kernel/arch/aarch64/include/arch/arch.h:121
+[WARNING] Old/Arch-Specific call found: __asm__ __volatile__("dmb in ./kernel/arch/aarch64/include/arch/arch.h:56
+
+--- FUNCTION DEPENDENCY MAP ---
+[INFO] Potential leaf/entry function: crc32 in ./tools/mkdisk.c
+[INFO] Potential leaf/entry function: xseek in ./tools/mkdisk.c
+[INFO] Potential leaf/entry function: xwrite in ./tools/mkdisk.c
+[INFO] Potential leaf/entry function: xmalloc in ./tools/mkdisk.c
+[INFO] Potential leaf/entry function: mark_block_used in ./tools/mkdisk.c
+[INFO] Potential leaf/entry function: mark_inode_used in ./tools/mkdisk.c
+[INFO] Potential leaf/entry function: write_file_to_inode in ./tools/mkdisk.c
+[INFO] Potential leaf/entry function: write_directory_inode in ./tools/mkdisk.c
+[INFO] Potential leaf/entry function: get_ext4_type in ./tools/mkdisk.c
+[INFO] Potential leaf/entry function: populate_directory in ./tools/mkdisk.c
+[INFO] Potential leaf/entry function: write_ext4_partition in ./tools/mkdisk.c
+main (./user/bin/notification_server.c) <- ./tools/mkfont.c, ./user/bin/shell.c, ./user/bin/demo3d.c, ./user/bin/regedit.c, ./tools/mkdisk.c, ./user/bin/writetest.c, ./user/bin/crash.c, ./user/bin/init.c, ./tools/stb_truetype.h, ./user/bin/ipc_send.c, ./user/bin/counter.c, ./user/bin/ipc_recv.c
+[INFO] Potential leaf/entry function: my_stbtt_initfont in ./tools/stb_truetype.h
+[INFO] Potential leaf/entry function: my_stbtt_print in ./tools/stb_truetype.h
+[INFO] Potential leaf/entry function: _start in ./user/bin/test_init.c
+proce_display_list (./user/bin/proce.c) <- ./user/bin/shell.c, ./user/bin/proce.h
+strlen (./kernel/lib/string.c) <- ./kernel/lib/ktest_samples.c, ./user/lib/lib.c, ./kernel/include/kernel/string.h, ./tools/mkdisk.c, ./user/lib/lib.h, ./user/bin/writetest.c, ./kernel/lib/registry.c, ./tools/stb_truetype.h, ./include/api/os1.h
+read (./user/lib/lib.c) <- ./user/bin/shell.c, ./include/api/os1.h, ./user/lib/lib.h
+__stack_chk_fail (./kernel/lib/stack_protector.c) <- ./user/lib/lib.c
+memset (./kernel/lib/string.c) <- ./user/bin/demo3d.c, ./kernel/include/kernel/string.h, ./kernel/arch/aarch64/mm/mmu.c, ./kernel/mm/pmm.c, ./kernel/graphics/compositor.c, ./kernel/drivers/gpu/virtio_gpu.c, ./user/lib/lib.h, ./kernel/mm/vmm.c, ./kernel/main.c, ./include/api/os1.h, ./kernel/arch/amd64/cpu/idt.c, ./kernel/sched/process.c, ./kernel/arch/amd64/mm/mmu.c, ./kernel/lib/registry.c, ./user/lib/lib.c, ./kernel/mm/buffer.c, ./kernel/drivers/virtio/virtio_blk.c, ./kernel/sched/elf.c, ./kernel/lib/kmalloc.c, ./kernel/arch/amd64/cpu/cpu.c, ./kernel/arch/amd64/cpu/gdt.c, ./kernel/fs/ext4.c, ./kernel/drivers/virtio/virtio_input.c
+write (./user/lib/lib.c) <- ./user/bin/shell.c, ./include/api/os1.h, ./user/lib/lib.h, ./kernel/fs/ext4.c
+get_time (./user/lib/lib.c) <- ./user/bin/shell.c, ./include/api/os1.h, ./user/lib/lib.h, ./user/bin/notification_server.c
+get_pid (./user/lib/lib.c) <- ./user/bin/shell.c, ./user/bin/demo3d.c, ./user/lib/lib.h, ./user/bin/notification_server.c, ./include/api/os1.h, ./user/bin/counter.c
+exit (./user/lib/lib.c) <- ./user/bin/shell.c, ./user/bin/demo3d.c, ./tools/mkdisk.c, ./user/lib/lib.h, ./include/api/os1.h
+spawn (./user/lib/lib.c) <- ./user/bin/shell.c, ./user/bin/init.c, ./include/api/os1.h, ./user/lib/lib.h
+kill_process (./user/lib/lib.c) <- ./user/bin/shell.c, ./include/api/os1.h, ./user/lib/lib.h
+wait (./user/lib/lib.c) <- ./user/bin/init.c, ./include/api/os1.h, ./user/lib/lib.h
+draw (./user/lib/lib.c) <- ./include/api/os1.h, ./user/lib/lib.h, ./kernel/graphics/compositor.c
+flush (./user/lib/lib.c) <- ./kernel/graphics/compositor.c, ./user/lib/lib.h, ./user/bin/init.c, ./include/api/os1.h, ./user/bin/counter.c, ./user/bin/ipc_recv.c
+create_window (./user/lib/lib.c) <- ./user/bin/shell.c, ./user/bin/demo3d.c, ./user/bin/regedit.c, ./user/lib/lib.h, ./user/bin/writetest.c, ./user/bin/notification_server.c, ./user/bin/ipc_send.c, ./include/api/os1.h, ./user/bin/counter.c, ./user/bin/ipc_recv.c
+destroy_window (./user/lib/lib.c) <- ./include/api/os1.h, ./user/lib/lib.h
+window_draw (./user/lib/lib.c) <- ./user/bin/shell.c, ./user/bin/regedit.c, ./user/lib/lib.h, ./user/bin/notification_server.c, ./user/bin/ipc_send.c, ./include/api/os1.h, ./user/bin/counter.c, ./user/bin/ipc_recv.c
+yield (./user/lib/lib.c) <- ./user/bin/regedit.c, ./user/lib/lib.h, ./user/bin/notification_server.c, ./user/bin/init.c, ./include/api/os1.h
+sleep (./user/lib/lib.c) <- ./user/lib/lib.h, ./user/bin/ipc_send.c, ./include/api/os1.h, ./user/bin/counter.c, ./user/bin/ipc_recv.c
+compositor_render (./kernel/graphics/compositor.c) <- ./user/bin/shell.c, ./user/bin/demo3d.c, ./user/bin/regedit.c, ./user/lib/lib.h, ./user/bin/notification_server.c, ./kernel/include/kernel/graphics.h, ./kernel/core/syscall_dispatch.c, ./kernel/arch/aarch64/cpu/syscall.c, ./user/lib/lib.c, ./user/bin/ipc_send.c, ./include/api/os1.h, ./kernel/drivers/virtio/virtio_input.c
+send (./user/lib/lib.c) <- ./user/bin/ipc_send.c, ./include/api/os1.h, ./user/lib/lib.h
+recv (./user/lib/lib.c) <- ./user/bin/regedit.c, ./include/api/os1.h, ./user/lib/lib.h, ./user/bin/ipc_recv.c
+notify (./user/lib/lib.c) <- ./user/bin/regedit.c, ./user/bin/init.c, ./include/api/os1.h, ./user/lib/lib.h
+try_recv (./user/lib/lib.c) <- ./include/api/os1.h, ./user/lib/lib.h, ./user/bin/notification_server.c
+set_window_flags (./user/lib/lib.c) <- ./include/api/os1.h, ./user/lib/lib.h, ./user/bin/notification_server.c
+set_focus (./user/lib/lib.c) <- ./user/bin/shell.c, ./include/api/os1.h, ./user/lib/lib.h
+print (./user/lib/lib.c) <- ./user/bin/shell.c, ./user/bin/demo3d.c, ./user/lib/lib.h, ./user/bin/init.c, ./include/api/os1.h, ./user/bin/counter.c
+print_hex (./user/lib/lib.c) <- ./user/bin/shell.c, ./include/api/os1.h, ./user/bin/counter.c, ./user/lib/lib.h
+vsprintf (./user/lib/lib.c) <- ./include/api/os1.h, ./user/lib/lib.h
+printf (./user/lib/lib.c) <- ./tools/mkfont.c, ./user/bin/shell.c, ./user/bin/demo3d.c, ./tools/mkdisk.c, ./user/lib/lib.h, ./user/bin/writetest.c, ./user/bin/crash.c, ./user/bin/notification_server.c, ./user/bin/init.c, ./user/bin/ipc_send.c, ./include/api/os1.h, ./user/bin/ipc_recv.c
+printf_win (./user/lib/lib.c) <- ./user/lib/lib.h, ./user/bin/writetest.c, ./user/bin/notification_server.c, ./user/bin/proce.c, ./include/api/os1.h
+sprintf (./user/lib/lib.c) <- ./user/bin/shell.c, ./user/bin/demo3d.c, ./user/lib/lib.h, ./include/api/os1.h, ./user/bin/counter.c
+snprintf (./kernel/lib/printk.c) <- ./user/bin/shell.c, ./tools/mkdisk.c, ./user/lib/lib.h, ./user/bin/notification_server.c, ./kernel/include/kernel/printk.h, ./user/lib/lib.c, ./include/api/os1.h
+getchar (./user/lib/lib.c) <- ./include/api/os1.h, ./user/lib/lib.h
+putchar (./user/lib/lib.c) <- ./tools/stb_truetype.h, ./include/api/os1.h, ./user/lib/lib.h
+gets (./user/lib/lib.c) <- ./include/api/os1.h, ./user/lib/lib.h
+fixmul (./user/lib/lib.c) <- ./include/api/os1.h, ./user/bin/demo3d.c, ./user/lib/lib.h
+sin_fp (./user/lib/lib.c) <- ./include/api/os1.h, ./user/bin/demo3d.c, ./user/lib/lib.h
+cos_fp (./user/lib/lib.c) <- ./include/api/os1.h, ./user/bin/demo3d.c, ./user/lib/lib.h
+registry_read (./user/lib/lib.c) <- ./user/bin/regedit.c, ./user/bin/ipc_send.c, ./include/api/os1.h, ./user/lib/lib.h
+registry_write (./user/lib/lib.c) <- ./include/api/os1.h, ./user/lib/lib.h, ./user/bin/notification_server.c
+file_write (./user/lib/lib.c) <- ./include/api/os1.h, ./user/lib/lib.h, ./user/bin/writetest.c
+file_read (./user/lib/lib.c) <- ./user/bin/shell.c, ./include/api/os1.h, ./user/lib/lib.h
+[INFO] Potential leaf/entry function: kernel_main in ./kernel/main.c
+[INFO] Potential leaf/entry function: secondary_cpu_entry in ./kernel/main.c
+driver_irq_init (./kernel/drivers/irq_ctrl.c) <- ./kernel/include/kernel/drivers.h, ./kernel/main.c
+driver_console_init (./kernel/drivers/console.c) <- ./kernel/include/kernel/drivers.h, ./kernel/main.c
+driver_timer_init (./kernel/drivers/sys_timer.c) <- ./kernel/include/kernel/drivers.h, ./kernel/main.c
+pci_config_read (./kernel/drivers/pci/pci.c) <- ./kernel/include/drivers/pci.h, ./kernel/drivers/virtio/virtio_input.c
+pci_config_write (./kernel/drivers/pci/pci.c) <- ./kernel/include/drivers/pci.h
+pci_find_device (./kernel/drivers/pci/pci.c) <- ./kernel/include/drivers/pci.h, ./kernel/arch/amd64/virtio.c
+pci_get_bar (./kernel/drivers/pci/pci.c) <- ./kernel/include/drivers/pci.h, ./kernel/arch/amd64/virtio.c, ./kernel/drivers/virtio/virtio_input.c
+pci_get_interrupt (./kernel/drivers/pci/pci.c) <- ./kernel/include/drivers/pci.h, ./kernel/arch/amd64/virtio.c, ./kernel/drivers/virtio/virtio_input.c
+gpu_register (./kernel/drivers/gpu/gpu_core.c) <- ./kernel/drivers/gpu/virtio_gpu.c, ./kernel/include/drivers/gpu/gpu.h
+gpu_unregister (./kernel/drivers/gpu/gpu_core.c) <- ./kernel/include/drivers/gpu/gpu.h
+virtio_gpu_init (./kernel/drivers/gpu/virtio_gpu.c) <- ./kernel/include/drivers/virtio_gpu.h, ./kernel/main.c
+virtio_input_init (./kernel/drivers/virtio/virtio_input.c) <- ./kernel/include/drivers/virtio_input.h, ./kernel/drivers/keyboard/keyboard.c
+virtio_input_poll (./kernel/drivers/virtio/virtio_input.c) <- ./kernel/include/drivers/virtio_input.h, ./kernel/drivers/keyboard/keyboard.c
+virtio_input_has_event (./kernel/drivers/virtio/virtio_input.c) <- ./kernel/include/drivers/virtio_input.h
+virtio_blk_init (./kernel/drivers/virtio/virtio_blk.c) <- ./kernel/include/drivers/virtio_blk.h, ./kernel/main.c
+virtio_blk_read (./kernel/drivers/virtio/virtio_blk.c) <- ./kernel/include/drivers/virtio_blk.h, ./kernel/fs/ext4.c, ./kernel/fs/gpt.c, ./kernel/mm/buffer.c
+virtio_blk_write (./kernel/drivers/virtio/virtio_blk.c) <- ./kernel/include/drivers/virtio_blk.h, ./kernel/fs/ext4.c, ./kernel/mm/buffer.c
+timer_init (./kernel/drivers/timer/timer.c) <- ./kernel/drivers/sys_timer.c, ./kernel/include/kernel/timer.h, ./kernel/include/drivers/timer.h
+timer_init_percpu (./kernel/drivers/timer/timer.c) <- ./kernel/include/drivers/timer.h, ./kernel/core/timer.c, ./kernel/main.c
+timer_get_ticks (./kernel/drivers/timer/timer.c) <- ./kernel/include/drivers/timer.h
+timer_get_us (./kernel/arch/amd64/platform/platform.c) <- ./kernel/arch/amd64/include/arch/amd64_internal.h, ./kernel/core/syscall_dispatch.c, ./kernel/include/drivers/timer.h, ./kernel/drivers/timer/timer.c
+timer_delay_us (./kernel/drivers/timer/timer.c) <- ./kernel/include/drivers/timer.h
+timer_delay_ms (./kernel/drivers/timer/timer.c) <- ./kernel/include/drivers/timer.h
+pic_init (./kernel/drivers/timer/pic_pit.c) <- ./kernel/drivers/irq_ctrl.c, ./kernel/arch/amd64/platform/platform.c, ./kernel/arch/amd64/include/arch/amd64_internal.h
+pit_init (./kernel/drivers/timer/pic_pit.c) <- ./kernel/drivers/sys_timer.c, ./kernel/arch/amd64/platform/platform.c, ./kernel/arch/amd64/include/arch/amd64_internal.h
+pic_send_eoi (./kernel/drivers/timer/pic_pit.c) <- ./kernel/arch/amd64/cpu/idt.c, ./kernel/arch/amd64/include/arch/amd64_internal.h
+pic_unmask (./kernel/drivers/timer/pic_pit.c) <- ./kernel/arch/amd64/include/arch/amd64_internal.h
+gic_register (./kernel/drivers/gic/gic.c) <- ./kernel/drivers/irq_ctrl.c, ./kernel/include/drivers/gic.h, ./kernel/arch/aarch64/platform.c
+uart_init (./kernel/drivers/uart/16550.c) <- ./kernel/arch/amd64/include/arch/amd64_internal.h, ./kernel/include/drivers/uart.h, ./kernel/drivers/uart/pl011.c, ./kernel/arch/amd64/platform/platform.c, ./kernel/drivers/console.c
+uart_putc (./kernel/drivers/uart/16550.c) <- ./kernel/lib/printk.c, ./kernel/drivers/uart/pl011.c, ./kernel/include/drivers/uart.h
+uart_getc (./kernel/drivers/uart/16550.c) <- ./kernel/drivers/uart/pl011.c, ./kernel/include/drivers/uart.h
+uart_getc_nonblock (./kernel/drivers/uart/16550.c) <- ./kernel/drivers/uart/pl011.c, ./kernel/include/drivers/uart.h
+uart_puts (./kernel/drivers/uart/16550.c) <- ./kernel/lib/printk.c, ./kernel/drivers/uart/pl011.c, ./kernel/include/drivers/uart.h, ./kernel/core/syscall_dispatch.c
+uart_puthex (./kernel/drivers/uart/16550.c) <- ./kernel/drivers/uart/pl011.c, ./kernel/include/drivers/uart.h
+keyboard_init (./kernel/drivers/keyboard/keyboard.c) <- ./kernel/include/drivers/keyboard.h, ./kernel/main.c
+keyboard_notify_input (./kernel/drivers/keyboard/keyboard.c) <- ./kernel/include/drivers/keyboard.h, ./kernel/drivers/virtio/virtio_input.c
+keyboard_poll (./kernel/drivers/keyboard/keyboard.c) <- ./kernel/include/drivers/keyboard.h
+keyboard_read_char_nonblock (./kernel/drivers/keyboard/keyboard.c) <- ./kernel/include/drivers/keyboard.h
+keyboard_read_char (./kernel/drivers/keyboard/keyboard.c) <- ./kernel/include/drivers/keyboard.h
+keyboard_read_line (./kernel/drivers/keyboard/keyboard.c) <- ./kernel/include/drivers/keyboard.h
+timer_setup (./kernel/core/timer.c) <- ./kernel/include/drivers/timer.h
+timer_add (./kernel/core/timer.c) <- ./kernel/include/drivers/timer.h
+timer_del (./kernel/core/timer.c) <- ./kernel/include/drivers/timer.h
+timer_pending (./kernel/core/timer.c) <- ./kernel/include/drivers/timer.h
+[INFO] Potential leaf/entry function: sys_get_time in ./kernel/core/syscall_dispatch.c
+[INFO] Potential leaf/entry function: sys_get_pid in ./kernel/core/syscall_dispatch.c
+[INFO] Potential leaf/entry function: sys_write in ./kernel/core/syscall_dispatch.c
+[INFO] Potential leaf/entry function: sys_exit in ./kernel/core/syscall_dispatch.c
+irq_register_chip (./kernel/irq/irq.c) <- ./kernel/drivers/timer/pic_pit.c, ./kernel/drivers/gic/gic.c, ./kernel/include/kernel/irq.h
+irq_init (./kernel/irq/irq.c) <- ./kernel/main.c, ./kernel/include/kernel/irq.h
+irq_init_percpu (./kernel/irq/irq.c) <- ./kernel/main.c, ./kernel/include/kernel/irq.h
+irq_register (./kernel/irq/irq.c) <- ./kernel/drivers/uart/pl011.c, ./kernel/drivers/virtio/virtio_input.c, ./kernel/include/kernel/irq.h
+irq_unregister (./kernel/irq/irq.c) <- ./kernel/include/kernel/irq.h
+irq_enable (./kernel/irq/irq.c) <- ./kernel/include/kernel/irq.h, ./kernel/drivers/timer/timer.c
+irq_disable (./kernel/irq/irq.c) <- ./kernel/include/kernel/irq.h
+irq_send_ipi_all (./kernel/irq/irq.c) <- ./kernel/lib/printk.c, ./kernel/include/kernel/irq.h
+enqueue_task (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h, ./kernel/core/syscall_dispatch.c, ./kernel/main.c
+sleep_on (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h
+wake_up (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h, ./kernel/drivers/uart/pl011.c, ./kernel/drivers/keyboard/keyboard.c
+idle_task_entry (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h, ./kernel/main.c
+process_init (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h, ./kernel/main.c
+process_terminate (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h, ./kernel/graphics/compositor.c, ./kernel/arch/aarch64/cpu/cpu.c, ./kernel/arch/aarch64/cpu/syscall.c, ./kernel/core/syscall_dispatch.c
+start_user_process (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h
+process_wait (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h, ./kernel/core/syscall_dispatch.c
+kernel_ipc_send (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h, ./kernel/drivers/keyboard/keyboard.c
+sys_ipc_send (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h, ./kernel/core/syscall_dispatch.c
+sys_ipc_recv (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h, ./kernel/core/syscall_dispatch.c
+sys_ipc_try_recv (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h, ./kernel/core/syscall_dispatch.c
+sys_getprocs (./kernel/sched/process.c) <- ./kernel/include/kernel/sched.h, ./kernel/core/syscall_dispatch.c
+process_load_elf (./kernel/sched/elf.c) <- ./kernel/include/kernel/sched.h, ./kernel/core/syscall_dispatch.c, ./kernel/main.c
+arch_virtio_read32 (./kernel/arch/aarch64/virtio.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/virtio.c
+arch_virtio_write32 (./kernel/arch/aarch64/virtio.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/virtio.c
+arch_virtio_probe (./kernel/arch/aarch64/virtio.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/virtio.c
+arch_cpu_init (./kernel/arch/aarch64/cpu/cpu.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/cpu/cpu.c, ./kernel/include/kernel/cpu.h
+arch_cpu_switch_context (./kernel/arch/aarch64/cpu/cpu.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/cpu/cpu.c, ./kernel/sched/process.c
+gdt_init (./kernel/arch/amd64/cpu/gdt.c) <- ./kernel/arch/amd64/cpu/cpu.c, ./kernel/arch/amd64/include/arch/amd64_internal.h
+gdt_set_rsp0 (./kernel/arch/amd64/cpu/gdt.c) <- ./kernel/arch/amd64/cpu/cpu.c, ./kernel/arch/amd64/include/arch/amd64_internal.h
+amd64_syscall_init (./kernel/arch/amd64/cpu/msr.c) <- ./kernel/arch/amd64/cpu/cpu.c, ./kernel/arch/amd64/include/arch/amd64_internal.h
+arch_copy_from_user (./kernel/arch/aarch64/cpu/syscall.c) <- ./kernel/arch/amd64/mm/uaccess.c, ./kernel/arch/amd64/cpu/syscall.c, ./kernel/core/syscall_dispatch.c, ./kernel/include/kernel/arch.h, ./kernel/include/kernel/vmm.h
+arch_copy_to_user (./kernel/arch/aarch64/cpu/syscall.c) <- ./kernel/arch/amd64/mm/uaccess.c, ./kernel/arch/amd64/cpu/syscall.c, ./kernel/core/syscall_dispatch.c, ./kernel/include/kernel/arch.h, ./kernel/include/kernel/vmm.h
+arch_copy_string_from_user (./kernel/arch/aarch64/cpu/syscall.c) <- ./kernel/arch/amd64/mm/uaccess.c, ./kernel/arch/amd64/cpu/syscall.c, ./kernel/core/syscall_dispatch.c, ./kernel/include/kernel/arch.h, ./kernel/include/kernel/vmm.h
+idt_init (./kernel/arch/amd64/cpu/idt.c) <- ./kernel/arch/amd64/cpu/cpu.c, ./kernel/arch/amd64/include/arch/amd64_internal.h
+arch_platform_early_init (./kernel/arch/aarch64/platform.c) <- ./kernel/arch/amd64/platform/platform.c, ./kernel/include/kernel/platform.h, ./kernel/main.c
+udelay (./kernel/arch/amd64/platform/platform.c) <- ./kernel/arch/amd64/include/arch/amd64_internal.h
+arch_pci_init (./kernel/arch/amd64/platform/platform.c) <- ./kernel/arch/amd64/include/arch/amd64_internal.h
+arch_vmm_set_secondary_pgd (./kernel/arch/aarch64/cpu/cpu.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/platform/platform.c, ./kernel/main.c
+arch_get_kernel_stack (./kernel/arch/aarch64/cpu/cpu.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/platform/platform.c, ./kernel/main.c
+arch_cpu_wake_secondary (./kernel/arch/amd64/platform/platform.c) <- ./kernel/include/kernel/arch.h, ./kernel/main.c
+arch_get_boot_info (./kernel/arch/amd64/platform/platform.c) <- ./kernel/include/kernel/arch.h, ./kernel/main.c
+arch_vmm_init_hw (./kernel/arch/aarch64/cpu/cpu.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/mm/mmu.c, ./kernel/mm/vmm.c
+arch_vmm_map_mmio (./kernel/arch/aarch64/cpu/cpu.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/mm/mmu.c, ./kernel/mm/vmm.c
+arch_vmm_init (./kernel/arch/amd64/mm/mmu.c) <- ./kernel/arch/amd64/include/arch/amd64_internal.h
+arch_vmm_map (./kernel/arch/aarch64/mm/mmu.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/mm/mmu.c, ./kernel/arch/aarch64/cpu/cpu.c
+arch_vmm_unmap (./kernel/arch/aarch64/mm/mmu.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/mm/mmu.c
+[INFO] Potential leaf/entry function: arch_vmm_get_physical in ./kernel/arch/amd64/mm/mmu.c
+[INFO] Potential leaf/entry function: arch_vmm_create_process_pgd in ./kernel/arch/amd64/mm/mmu.c
+[INFO] Potential leaf/entry function: arch_vmm_destroy_process_pgd in ./kernel/arch/amd64/mm/mmu.c
+[INFO] Potential leaf/entry function: arch_vmm_protect in ./kernel/arch/amd64/mm/mmu.c
+arch_vmm_map_range (./kernel/arch/aarch64/mm/mmu.c) <- ./kernel/include/kernel/arch.h, ./kernel/arch/amd64/mm/mmu.c, ./kernel/mm/vmm.c
+kmalloc_init (./kernel/lib/kmalloc.c) <- ./kernel/include/kernel/kmalloc.h
+kmalloc (./kernel/lib/kmalloc.c) <- ./kernel/sched/process.c, ./kernel/graphics/region.c, ./kernel/graphics/compositor.c, ./kernel/drivers/gpu/virtio_gpu.c, ./kernel/graphics/draw3d.c, ./kernel/core/syscall_dispatch.c, ./kernel/include/kernel/kmalloc.h, ./kernel/fs/ext4.c, ./kernel/mm/buffer.c
+kcalloc (./kernel/lib/kmalloc.c) <- ./kernel/include/kernel/kmalloc.h, ./kernel/graphics/region.c
+kfree (./kernel/lib/kmalloc.c) <- ./kernel/sched/process.c, ./kernel/graphics/region.c, ./kernel/graphics/compositor.c, ./kernel/drivers/gpu/virtio_gpu.c, ./kernel/core/syscall_dispatch.c, ./kernel/include/kernel/kmalloc.h, ./kernel/fs/ext4.c, ./kernel/mm/buffer.c
+krealloc (./kernel/lib/kmalloc.c) <- ./kernel/include/kernel/kmalloc.h
+k_isqrt (./kernel/lib/math.c) <- ./kernel/include/kernel/math.h
+k_sqrt_fp (./kernel/lib/math.c) <- ./kernel/include/kernel/math.h
+k_fixmul (./kernel/lib/math.c) <- ./kernel/include/kernel/math.h
+k_fixdiv (./kernel/lib/math.c) <- ./kernel/include/kernel/math.h
+k_int_to_fp (./kernel/lib/math.c) <- ./kernel/include/kernel/math.h
+k_fp_to_int (./kernel/lib/math.c) <- ./kernel/include/kernel/math.h
+k_fp_to_int_round (./kernel/lib/math.c) <- ./kernel/include/kernel/math.h
+k_fabs_fp (./kernel/lib/math.c) <- ./kernel/include/kernel/math.h
+k_floor_fp (./kernel/lib/math.c) <- ./kernel/include/kernel/math.h
+k_ceil_fp (./kernel/lib/math.c) <- ./kernel/include/kernel/math.h
+k_sin_fp (./kernel/lib/math.c) <- ./kernel/graphics/draw3d.c, ./kernel/include/kernel/math.h
+k_cos_fp (./kernel/lib/math.c) <- ./kernel/graphics/draw3d.c, ./kernel/include/kernel/math.h
+k_lerp_fp (./kernel/lib/math.c) <- ./kernel/include/kernel/math.h
+vsnprintf (./kernel/lib/printk.c) <- ./kernel/include/kernel/printk.h, ./user/lib/lib.c, ./include/api/os1.h, ./user/lib/lib.h
+vprintk (./kernel/lib/printk.c) <- ./kernel/include/kernel/printk.h
+printk (./kernel/lib/printk.c) <- ./kernel/include/kernel/printk.h, ./kernel/include/kernel/test.h, ./kernel/lib/ktest.c, ./kernel/main.c, ./kernel/drivers/keyboard/keyboard.c
+panic (./kernel/lib/printk.c) <- ./kernel/sched/process.c, ./kernel/drivers/timer/timer.c, ./kernel/cpu.c, ./kernel/mm/pmm.c, ./kernel/mm/vmm.c, ./kernel/include/kernel/printk.h, ./kernel/arch/aarch64/cpu/cpu.c, ./kernel/lib/stack_protector.c, ./kernel/arch/aarch64/cpu/syscall.c, ./kernel/main.c
+strnlen (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h
+strcmp (./kernel/lib/string.c) <- ./kernel/lib/ktest_samples.c, ./tools/mkdisk.c, ./kernel/lib/registry.c, ./kernel/include/kernel/string.h
+strncmp (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h
+strcpy (./kernel/lib/string.c) <- ./tools/mkdisk.c, ./kernel/drivers/gpu/virtio_gpu.c, ./kernel/include/kernel/string.h
+strncpy (./kernel/lib/string.c) <- ./kernel/sched/process.c, ./kernel/include/kernel/string.h, ./kernel/lib/registry.c
+strlcpy (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h
+strcat (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h
+strncat (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h
+strlcat (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h
+strchr (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h
+strrchr (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h
+strstr (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h
+memcpy (./kernel/lib/string.c) <- ./kernel/sched/process.c, ./kernel/include/kernel/string.h, ./kernel/graphics/compositor.c, ./kernel/arch/amd64/mm/mmu.c, ./kernel/arch/amd64/mm/uaccess.c, ./tools/mkdisk.c, ./kernel/arch/amd64/cpu/syscall.c, ./kernel/arch/aarch64/cpu/syscall.c, ./kernel/fs/gpt.c, ./kernel/lib/kmalloc.c, ./kernel/fs/ext4.c
+memmove (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h, ./kernel/graphics/compositor.c
+memcmp (./kernel/lib/string.c) <- ./kernel/sched/elf.c, ./kernel/fs/ext4.c, ./kernel/include/kernel/string.h
+memchr (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h
+bzero (./kernel/lib/string.c) <- ./kernel/include/kernel/string.h
+ktest_run_all (./kernel/lib/ktest.c) <- ./kernel/include/kernel/test.h, ./kernel/main.c
+registry_init (./kernel/lib/registry.c) <- ./kernel/include/kernel/registry.h, ./kernel/main.c
+registry_set (./kernel/lib/registry.c) <- ./kernel/include/kernel/registry.h
+registry_get (./kernel/lib/registry.c) <- ./kernel/include/kernel/registry.h
+sys_registry (./kernel/lib/registry.c) <- ./kernel/include/kernel/registry.h, ./kernel/core/syscall_dispatch.c
+pmm_init_region (./kernel/mm/pmm.c) <- ./kernel/include/kernel/pmm.h, ./kernel/arch/amd64/platform/platform.c
+pmm_init (./kernel/mm/pmm.c) <- ./kernel/include/kernel/pmm.h, ./kernel/main.c
+pmm_alloc_page (./kernel/mm/pmm.c) <- ./kernel/sched/process.c, ./kernel/arch/aarch64/mm/mmu.c, ./kernel/arch/amd64/mm/mmu.c, ./kernel/drivers/gpu/virtio_gpu.c, ./kernel/mm/vmm.c, ./kernel/sched/elf.c, ./kernel/fs/gpt.c, ./kernel/include/kernel/pmm.h, ./kernel/drivers/virtio/virtio_input.c, ./kernel/mm/buffer.c
+pmm_alloc_pages (./kernel/mm/pmm.c) <- ./kernel/sched/process.c, ./kernel/drivers/virtio/virtio_blk.c, ./kernel/drivers/gpu/virtio_gpu.c, ./kernel/lib/kmalloc.c, ./kernel/include/kernel/pmm.h, ./kernel/drivers/virtio/virtio_input.c
+pmm_free_page (./kernel/mm/pmm.c) <- ./kernel/sched/process.c, ./kernel/arch/amd64/mm/mmu.c, ./kernel/drivers/gpu/virtio_gpu.c, ./kernel/mm/vmm.c, ./kernel/sched/elf.c, ./kernel/fs/gpt.c, ./kernel/include/kernel/pmm.h, ./kernel/mm/buffer.c
+pmm_free_pages (./kernel/mm/pmm.c) <- ./kernel/lib/kmalloc.c, ./kernel/include/kernel/pmm.h, ./kernel/sched/process.c
+pmm_alloc_aligned (./kernel/mm/pmm.c) <- ./kernel/include/kernel/pmm.h
+pmm_page_to_phys (./kernel/mm/pmm.c) <- ./kernel/include/kernel/pmm.h
+pmm_get_free_pages (./kernel/mm/pmm.c) <- ./kernel/include/kernel/pmm.h
+pmm_get_total_pages (./kernel/mm/pmm.c) <- ./kernel/include/kernel/pmm.h
+pmm_dump_stats (./kernel/mm/pmm.c) <- ./kernel/include/kernel/pmm.h
+buffer_init (./kernel/mm/buffer.c) <- ./kernel/include/kernel/buffer.h, ./kernel/main.c
+buffer_put (./kernel/mm/buffer.c) <- ./kernel/include/kernel/buffer.h
+buffer_sync (./kernel/mm/buffer.c) <- ./kernel/include/kernel/buffer.h
+vmm_map_page (./kernel/mm/vmm.c) <- ./kernel/sched/elf.c, ./kernel/drivers/gpu/virtio_gpu.c, ./kernel/include/kernel/vmm.h, ./kernel/drivers/virtio/virtio_blk.c
+vmm_unmap_page (./kernel/mm/vmm.c) <- ./kernel/include/kernel/vmm.h
+vmm_unmap_page_locked (./kernel/mm/vmm.c) <- ./kernel/include/kernel/vmm.h
+vmm_init (./kernel/mm/vmm.c) <- ./kernel/include/kernel/vmm.h, ./kernel/main.c
+vmm_create_pgd (./kernel/mm/vmm.c) <- ./kernel/include/kernel/vmm.h, ./kernel/sched/process.c
+vmm_destroy_pgd (./kernel/mm/vmm.c) <- ./kernel/include/kernel/vmm.h, ./kernel/sched/process.c
+gl_clear (./kernel/graphics/gl.c) <- ./kernel/graphics/graphics.c, ./kernel/include/graphics/gl.h
+gl_draw_pixel (./kernel/graphics/gl.c) <- ./kernel/graphics/graphics.c, ./kernel/include/graphics/gl.h, ./kernel/graphics/draw2d.c
+gl_blit (./kernel/graphics/gl.c) <- ./kernel/include/graphics/gl.h
+graphics_init (./kernel/graphics/graphics.c) <- ./kernel/include/kernel/graphics.h, ./kernel/main.c
+graphics_draw_pixel (./kernel/graphics/graphics.c) <- ./kernel/include/kernel/graphics.h
+graphics_clear (./kernel/graphics/graphics.c) <- ./kernel/include/kernel/graphics.h
+graphics_swap_buffers (./kernel/graphics/graphics.c) <- ./kernel/include/kernel/graphics.h
+graphics_draw_char (./kernel/graphics/graphics.c) <- ./kernel/include/kernel/graphics.h
+graphics_draw_string (./kernel/graphics/graphics.c) <- ./kernel/include/kernel/graphics.h
+[INFO] Potential leaf/entry function: graphics_draw_circle in ./kernel/graphics/draw2d.c
+[INFO] Potential leaf/entry function: graphics_fill_circle in ./kernel/graphics/draw2d.c
+[INFO] Potential leaf/entry function: graphics_blend in ./kernel/graphics/draw2d.c
+region_destroy (./kernel/graphics/region.c) <- ./kernel/include/kernel/region.h, ./kernel/graphics/compositor.c
+region_add_rect (./kernel/graphics/region.c) <- ./kernel/include/kernel/region.h, ./kernel/graphics/compositor.c
+region_subtract (./kernel/graphics/region.c) <- ./kernel/include/kernel/region.h, ./kernel/graphics/compositor.c
+region_intersect_rect (./kernel/graphics/region.c) <- ./kernel/include/kernel/region.h, ./kernel/graphics/compositor.c
+region_clear (./kernel/graphics/region.c) <- ./kernel/include/kernel/region.h
+graphics_char_width (./kernel/graphics/font.c) <- ./kernel/include/kernel/graphics.h
+graphics_string_width (./kernel/graphics/font.c) <- ./kernel/include/kernel/graphics.h
+graphics_font_height (./kernel/graphics/font.c) <- ./kernel/include/kernel/graphics.h
+graphics_font_ascent (./kernel/graphics/font.c) <- ./kernel/include/kernel/graphics.h
+render3d_init (./kernel/graphics/draw3d.c) <- ./kernel/include/kernel/graphics.h
+render3d_clear_zbuffer (./kernel/graphics/draw3d.c) <- ./kernel/include/kernel/graphics.h
+[INFO] Potential leaf/entry function: mat4_identity in ./kernel/graphics/draw3d.c
+[INFO] Potential leaf/entry function: mat4_translate in ./kernel/graphics/draw3d.c
+[INFO] Potential leaf/entry function: mat4_scale in ./kernel/graphics/draw3d.c
+[INFO] Potential leaf/entry function: mat4_rotate_y in ./kernel/graphics/draw3d.c
+[INFO] Potential leaf/entry function: mat4_mul in ./kernel/graphics/draw3d.c
+[INFO] Potential leaf/entry function: mat4_mul_vec in ./kernel/graphics/draw3d.c
+[INFO] Potential leaf/entry function: mat4_perspective in ./kernel/graphics/draw3d.c
+compositor_init (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h, ./kernel/main.c
+compositor_destroy_window (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h, ./kernel/core/syscall_dispatch.c
+compositor_destroy_windows_by_pid (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h, ./kernel/sched/process.c
+compositor_get_buffer (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h
+compositor_get_window_by_pid (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h, ./kernel/arch/aarch64/cpu/syscall.c, ./kernel/core/syscall_dispatch.c
+compositor_get_focus_pid (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h, ./kernel/sched/process.c
+compositor_move_window (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h
+compositor_window_write (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h, ./kernel/arch/aarch64/cpu/syscall.c, ./kernel/core/syscall_dispatch.c
+compositor_handle_click (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h, ./kernel/drivers/virtio/virtio_input.c
+compositor_update_mouse (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h, ./kernel/drivers/virtio/virtio_input.c
+compositor_tick (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h, ./kernel/core/timer.c, ./kernel/drivers/timer/timer.c
+compositor_set_window_flags (./kernel/graphics/compositor.c) <- ./kernel/include/kernel/graphics.h, ./kernel/arch/aarch64/cpu/syscall.c, ./kernel/core/syscall_dispatch.c
+gpt_init (./kernel/fs/gpt.c) <- ./kernel/include/kernel/gpt.h, ./kernel/main.c
+ext4_init (./kernel/fs/ext4.c) <- ./kernel/include/kernel/ext4.h, ./kernel/main.c
+ext4_find_inode (./kernel/fs/ext4.c) <- ./kernel/include/kernel/ext4.h, ./kernel/sched/elf.c
