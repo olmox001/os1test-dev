@@ -71,15 +71,17 @@ volatile uint64_t jiffies = 0;
 
 extern uint64_t mb_magic;
 
+#include <drivers/timer.h>
+
 void arch_platform_early_init(void) {
   uart_init();
-  pr_info("AMD64 Platform Initialization (Magic: 0x%lx)\n", mb_magic);
+  pr_info("AMD64 Platform Initialization (Magic: 0x%lx, Info: 0x%lx)\n", mb_magic, mb_info_ptr);
 
   pic_init();
-  pit_init_hz(100);
+  pit_init_hz(HZ);
 
   if (mb_info_ptr == 0) {
-    panic("Boot information missing!\n");
+    pr_warn("Boot information missing! Attempting to continue with fallback.\n");
   }
 
   arch_region_count = 0;
@@ -95,7 +97,6 @@ void arch_platform_early_init(void) {
       uint32_t processed = 0;
       
       while (processed < mmap_len && arch_region_count < 32) {
-          /* MB1 entries have a size field at the beginning, followed by addr, len, type */
           uint32_t size = *(uint32_t *)(uintptr_t)mmap_ptr;
           struct mb2_mmap_entry *entry = (struct mb2_mmap_entry *)(uintptr_t)(mmap_ptr + 4);
           
@@ -145,18 +146,19 @@ void arch_platform_early_init(void) {
     for (uint32_t i = 0; i < pvh->memmap_entries && arch_region_count < 32; i++) {
         arch_mem_regions[arch_region_count].base = entries[i].addr;
         arch_mem_regions[arch_region_count].size = entries[i].len;
-        /* PVH type 1 is usable RAM */
         arch_mem_regions[arch_region_count].type = (entries[i].type == 1) ? MEM_REGION_USABLE : MEM_REGION_RESERVED;
         arch_region_count++;
     }
   } else {
-      pr_warn("Unknown boot protocol (Magic: 0x%lx). Using 128MB fallback.\n", mb_magic);
+      pr_warn("Unknown boot protocol (Magic: 0x%lx). Using 1GB default fallback.\n", mb_magic);
+      /* Use 1GB fallback for QEMU compatibility if magic is missing */
       arch_mem_regions[0].base = 0x100000;
-      arch_mem_regions[0].size = 128ULL * 1024 * 1024;
+      arch_mem_regions[0].size = 1024ULL * 1024 * 1024;
       arch_mem_regions[0].type = MEM_REGION_USABLE;
       arch_region_count = 1;
   }
 }
+
 
 uint64_t timer_get_us(void) {
   /* Stub: return TSC based pseudo-time or PIT ticks.

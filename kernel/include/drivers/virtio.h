@@ -86,17 +86,20 @@ struct vring_used {
   struct vring_used_elem ring[];
 };
 
-/* Arch abstraction */
-uint32_t virtio_read_reg(uintptr_t base, uint32_t offset);
-void virtio_write_reg(uintptr_t base, uint32_t offset, uint32_t value);
-void virtio_notify(uintptr_t base, uint32_t queue_idx);
+/* Unified VirtIO Device Handle */
+struct virtio_device;
+typedef struct virtio_device *virtio_handle_t;
 
-uintptr_t arch_virtio_register_pci(uint32_t bdf);
+/* Arch abstraction */
+uint32_t virtio_read_reg(virtio_handle_t dev, uint32_t offset);
+void virtio_write_reg(virtio_handle_t dev, uint32_t offset, uint32_t value);
+void virtio_notify(virtio_handle_t dev, uint32_t queue_idx);
+
 void arch_virtio_scan(void);
-void virtio_setup_queue(uintptr_t base, uint32_t queue_idx, uint64_t desc,
+void virtio_setup_queue(virtio_handle_t dev, uint32_t queue_idx, uint64_t desc,
                         uint64_t avail, uint64_t used);
 int arch_virtio_get_count(uint32_t device_id);
-int arch_virtio_get_device(uint32_t device_id, int index, uintptr_t *out_base,
+int arch_virtio_get_device(uint32_t device_id, int index, virtio_handle_t *out_dev,
                            uint32_t *out_irq);
 
 #endif /* _DRIVERS_VIRTIO_H */

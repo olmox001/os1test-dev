@@ -105,3 +105,26 @@ uint8_t pci_get_interrupt(int bdf) {
     uint8_t func = bdf & 0xFF;
     return pci_config_read(bus, dev, func, 0x3C) & 0xFF;
 }
+/* Get BAR size */
+uint32_t pci_get_bar_size(int bdf, int bar_index) {
+    uint8_t bus = (bdf >> 16) & 0xFF;
+    uint8_t dev = (bdf >> 8) & 0xFF;
+    uint8_t func = bdf & 0xFF;
+    uint8_t offset = 0x10 + (bar_index * 4);
+
+    uint32_t original = pci_config_read(bus, dev, func, offset);
+    pci_config_write(bus, dev, func, offset, 0xFFFFFFFF);
+    uint32_t size = pci_config_read(bus, dev, func, offset);
+    pci_config_write(bus, dev, func, offset, original);
+
+    if (size == 0 || size == 0xFFFFFFFF) return 0;
+    
+    /* Clear flags */
+    if (size & 1) { /* I/O */
+        size &= 0xFFFFFFFC;
+    } else { /* Memory */
+        size &= 0xFFFFFFF0;
+    }
+    
+    return ~size + 1;
+}

@@ -24,7 +24,7 @@ extern void compositor_update_mouse(int dx, int dy, int absolute);
 #define INPUT_QSIZE 16
 
 struct virtio_input_dev {
-  uintptr_t base;
+  virtio_handle_t handle;
   uint32_t irq;
   int active;
   int is_pci;
@@ -48,9 +48,9 @@ static volatile uint32_t input_tail = 0;
 static void virtio_input_handler(uint32_t irq, void *data);
 
 /* Helper macros / functions for transport abstraction */
-#define v_read32(dev, off) virtio_read_reg((dev)->base, (off))
-#define v_write32(dev, off, val) virtio_write_reg((dev)->base, (off), (val))
-#define v_notify(dev, q) virtio_notify((dev)->base, (q))
+#define v_read32(dev, off) virtio_read_reg((dev)->handle, (off))
+#define v_write32(dev, off, val) virtio_write_reg((dev)->handle, (off), (val))
+#define v_notify(dev, q) virtio_notify((dev)->handle, (q))
 
 static void virtio_input_add_event(uint16_t type, uint16_t code,
                                    int32_t value) {
@@ -64,13 +64,13 @@ static void virtio_input_add_event(uint16_t type, uint16_t code,
   input_head = next;
 }
 
-static void init_device(uintptr_t base, uint32_t irq, int is_pci) {
+static void init_device(virtio_handle_t handle, uint32_t irq, int is_pci) {
   (void)is_pci;
   if (input_dev_count >= MAX_INPUT_DEVS)
     return;
 
   struct virtio_input_dev *dev = &input_devs[input_dev_count++];
-  dev->base = base;
+  dev->handle = handle;
   dev->irq = irq;
   dev->active = 0;
 
@@ -97,7 +97,7 @@ static void init_device(uintptr_t base, uint32_t irq, int is_pci) {
   /* Rings are already identity mapped */
 
   /* Use unified HAL API */
-  virtio_setup_queue(base, 0, (uint64_t)dev->desc, (uint64_t)dev->avail, (uint64_t)dev->used);
+  virtio_setup_queue(handle, 0, (uint64_t)dev->desc, (uint64_t)dev->avail, (uint64_t)dev->used);
 
   dev->events = (struct virtio_input_event *)pmm_alloc_page();
   memset(dev->events, 0, sizeof(struct virtio_input_event) * INPUT_QSIZE);
@@ -187,10 +187,10 @@ void virtio_input_init(void) {
 
   int count = arch_virtio_get_count(VIRTIO_DEV_INPUT);
   for (int i = 0; i < count; i++) {
-    uintptr_t base = 0;
+    virtio_handle_t dev = NULL;
     uint32_t irq = 0;
-    if (arch_virtio_get_device(VIRTIO_DEV_INPUT, i, &base, &irq) == 0) {
-      init_device(base, irq, 0);
+    if (arch_virtio_get_device(VIRTIO_DEV_INPUT, i, &dev, &irq) == 0) {
+      init_device(dev, irq, 0);
     }
   }
 }

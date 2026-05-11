@@ -19,7 +19,7 @@ static struct vring_avail *avail;
 static struct vring_used *used;
 
 struct virtio_gpu_state {
-  uint64_t base;
+  virtio_handle_t handle;
   uint32_t qsize;
   void *backing_store;
   uint32_t resource_id;
@@ -105,7 +105,7 @@ static struct gpu_ops vgpu_ops = {
 
 static int virtio_gpu_send(struct virtio_gpu_state *priv, void *cmd,
                            uint32_t cmd_len, void *resp, uint32_t resp_len) {
-  if (!priv->base)
+  if (!priv->handle)
     return -1;
 
   desc[0].addr = (uint64_t)cmd;
@@ -128,13 +128,13 @@ static int virtio_gpu_send(struct virtio_gpu_state *priv, void *cmd,
   avail->idx++;
   arch_data_barrier();
 
-  virtio_notify(priv->base, 0);
+  virtio_notify(priv->handle, 0);
 
   uint64_t timeout = 200000000;
   while (*idx_ptr == old_idx && timeout > 0) {
     timeout--;
   }
-  virtio_read_reg(priv->base, VIRTIO_MMIO_INTERRUPT_ACK);
+  virtio_read_reg(priv->handle, VIRTIO_MMIO_INTERRUPT_ACK);
 
   if (timeout == 0) {
     pr_err("%s", "VirtIO-GPU: Timeout!\n");
@@ -146,18 +146,18 @@ static int virtio_gpu_send(struct virtio_gpu_state *priv, void *cmd,
 void virtio_gpu_init(void) {
   pr_info("%s", "VirtIO-GPU: Probing...\n");
 
-  uintptr_t base = 0;
+  virtio_handle_t dev_handle = NULL;
   uint32_t irq = 0;
 
-  if (arch_virtio_get_device(VIRTIO_DEV_GPU, 0, &base, &irq) == 0) {
-    pr_info("VirtIO-GPU: Found device at handle 0x%016lx (IRQ %u)\n", base, irq);
+  if (arch_virtio_get_device(VIRTIO_DEV_GPU, 0, &dev_handle, &irq) == 0) {
+    pr_info("VirtIO-GPU: Found device (IRQ %u)\n", irq);
 
     struct gpu_device *dev = kmalloc(sizeof(struct gpu_device));
     struct virtio_gpu_state *priv = kmalloc(sizeof(struct virtio_gpu_state));
     memset(dev, 0, sizeof(*dev));
     memset(priv, 0, sizeof(*priv));
 
-    priv->base = base;
+    priv->handle = dev_handle;
     priv->dev = dev;
     dev->priv = priv;
     dev->ops = &vgpu_ops;
@@ -165,20 +165,20 @@ void virtio_gpu_init(void) {
     strcpy(dev->name, "VirtIO-GPU");
 
     /* Reset device */
-    virtio_write_reg(base, VIRTIO_MMIO_STATUS, 0);
+    virtio_write_reg(dev_handle, VIRTIO_MMIO_STATUS, 0);
 
     /* Acknowledge + Driver */
     uint32_t status = VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER;
-    virtio_write_reg(base, VIRTIO_MMIO_STATUS, status);
+    virtio_write_reg(dev_handle, VIRTIO_MMIO_STATUS, status);
 
     /* Feature negotiation */
-    uint32_t features = virtio_read_reg(base, VIRTIO_MMIO_DEVICE_FEATURES);
-    virtio_write_reg(base, VIRTIO_MMIO_DRIVER_FEATURES, features);
+    uint32_t features = virtio_read_reg(dev_handle, VIRTIO_MMIO_DEVICE_FEATURES);
+    virtio_write_reg(dev_handle, VIRTIO_MMIO_DRIVER_FEATURES, features);
 
     status |= VIRTIO_STATUS_FEATURES_OK;
-    virtio_write_reg(base, VIRTIO_MMIO_STATUS, status);
+    virtio_write_reg(dev_handle, VIRTIO_MMIO_STATUS, status);
 
-    if (!(virtio_read_reg(base, VIRTIO_MMIO_STATUS) &
+    if (!(virtio_read_reg(dev_handle, VIRTIO_MMIO_STATUS) &
           VIRTIO_STATUS_FEATURES_OK)) {
       pr_err("%s", "VirtIO-GPU: Negotiation failed\n");
       kfree(dev);
@@ -187,10 +187,10 @@ void virtio_gpu_init(void) {
     }
 
     /* Queue 0 setup */
-    virtio_write_reg(base, VIRTIO_MMIO_QUEUE_SEL, 0);
-    uint32_t qmax = virtio_read_reg(base, VIRTIO_MMIO_QUEUE_NUM_MAX);
+    virtio_write_reg(dev_handle, VIRTIO_MMIO_QUEUE_SEL, 0);
+    uint32_t qmax = virtio_read_reg(dev_handle, VIRTIO_MMIO_QUEUE_NUM_MAX);
     priv->qsize = (qmax > 16) ? 16 : qmax;
-    virtio_write_reg(base, VIRTIO_MMIO_QUEUE_NUM, priv->qsize);
+    virtio_write_reg(dev_handle, VIRTIO_MMIO_QUEUE_NUM, priv->qsize);
 
     void *qmem = pmm_alloc_pages(2);
     memset(qmem, 0, 8192);
@@ -198,20 +198,16 @@ void virtio_gpu_init(void) {
     avail = (struct vring_avail *)((uint8_t *)qmem + priv->qsize * 16);
     used = (struct vring_used *)((uint8_t *)qmem + 4096);
 
-    /* Rings are identity mapped by default RAM mapping */
-
     /* Use unified HAL API for queue setup */
-    virtio_setup_queue(base, 0, (uint64_t)desc, (uint64_t)avail, (uint64_t)used);
+    virtio_setup_queue(dev_handle, 0, (uint64_t)desc, (uint64_t)avail, (uint64_t)used);
 
     if (!gpu_cmd_buf)
       gpu_cmd_buf = pmm_alloc_page();
     if (!gpu_resp_buf)
       gpu_resp_buf = pmm_alloc_page();
 
-    /* Buffers are identity mapped */
-
     /* Driver OK */
-    virtio_write_reg(base, VIRTIO_MMIO_STATUS,
+    virtio_write_reg(dev_handle, VIRTIO_MMIO_STATUS,
                      VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER |
                          VIRTIO_STATUS_DRIVER_OK);
 
