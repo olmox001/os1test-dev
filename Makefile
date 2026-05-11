@@ -124,7 +124,8 @@ KERN_C_SOURCES = \
     $(KERNEL_DIR)/drivers/uart/16550.c \
     $(KERNEL_DIR)/drivers/timer/pic_pit.c \
     $(ARCH_DIR)/platform/platform.c \
-    $(KERNEL_DIR)/drivers/pci/pci.c
+    $(KERNEL_DIR)/drivers/pci/pci.c \
+    $(ARCH_DIR)/virtio.c
 else
 # Bootloader sources
 BOOT_SOURCES = \
@@ -141,6 +142,7 @@ KERN_C_SOURCES = \
     $(ARCH_DIR)/cpu/syscall.c \
     $(ARCH_DIR)/mm/mmu.c \
     $(ARCH_DIR)/platform.c \
+    $(ARCH_DIR)/virtio.c \
     $(KERNEL_DIR)/drivers/uart/pl011.c \
     $(KERNEL_DIR)/drivers/gic/gic.c \
     $(KERNEL_DIR)/drivers/timer/timer.c

@@ -99,11 +99,14 @@ int arch_vmm_unmap(uint64_t pgd, uint64_t va);
 #define arch_get_sctlr() __arch_get_sctlr()
 #define arch_set_sctlr(v) __arch_set_sctlr(v)
 
-/* --- Backward Compatibility Aliases (To be migrated) --- */
-#define arch_dsb() arch_mb()
-#define arch_dmb() arch_mb()
+/* --- VirtIO HAL --- */
+uint32_t arch_virtio_read32(uintptr_t base, uint32_t offset);
+void arch_virtio_write32(uintptr_t base, uint32_t offset, uint32_t val);
+int arch_virtio_probe(uint32_t device_id, uintptr_t *out_base, uint32_t *out_irq);
+
+/* --- Compatibility Aliases --- */
 #define arch_wfi() arch_idle()
-#define arch_wfe() __arch_wfe()
 #define arch_sev() __arch_sev()
+#define arch_wfe() __arch_wfe()
 
 #endif /* _KERNEL_ARCH_H */
