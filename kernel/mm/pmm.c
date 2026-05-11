@@ -289,11 +289,13 @@ void pmm_free_page(void *page) {
     return;
 
   uint64_t phys = (uint64_t)page;
+#if ARCH_MEMORY_BASE > 0
   if (phys < MEMORY_BASE) {
     pr_err("PMM: Attempt to free invalid address %p (below MEMORY_BASE)\n",
            page);
     return;
   }
+#endif
 
   uint64_t pfn = phys_to_pfn(phys - MEMORY_BASE);
   if (pfn >= total_pages) {
@@ -392,8 +394,10 @@ void *pmm_alloc_aligned(size_t size, size_t align) {
  * Get page descriptor for physical address
  */
 struct page *pmm_phys_to_page(uint64_t phys) {
+#if ARCH_MEMORY_BASE > 0
   if (phys < MEMORY_BASE)
     return NULL;
+#endif
   uint64_t pfn = phys_to_pfn(phys - MEMORY_BASE);
   if (pfn >= total_pages)
     return NULL;

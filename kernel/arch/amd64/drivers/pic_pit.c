@@ -39,14 +39,21 @@ void pic_init(void) {
   pr_info("PIC Initialized. IRQs 0-1 mapped to 32-33.\n");
 }
 
+extern struct pt_regs *kernel_timer_tick(struct pt_regs *regs);
+
+struct pt_regs *amd64_timer_interrupt(struct pt_regs *regs) {
+  pic_send_eoi(0);
+  return kernel_timer_tick(regs);
+}
+
 void pit_init(void) {
-  /* Frequency = 1193182 / divisor. For 1000 Hz (1ms), divisor = 1193 */
-  uint16_t divisor = 1193;
+  /* Frequency = 1193182 / divisor. For 100 Hz, divisor = 11932 */
+  uint16_t divisor = 11932;
   outb(PIT_CMD, 0x36); /* Channel 0, lobyte/hibyte, square wave */
   outb(PIT_CH0, (uint8_t)(divisor & 0xFF));
   outb(PIT_CH0, (uint8_t)((divisor >> 8) & 0xFF));
   
-  pr_info("PIT Initialized (1000 Hz).\n");
+  pr_info("PIT Initialized (100 Hz).\n");
 }
 
 void pic_send_eoi(uint8_t irq) {
@@ -56,15 +63,10 @@ void pic_send_eoi(uint8_t irq) {
   outb(PIC1_CMD, 0x20);
 }
 
-void amd64_timer_interrupt(void) {
-  jiffies++;
-  pic_send_eoi(0);
-  timer_tick();
-}
-
-void amd64_keyboard_interrupt(void) {
+struct pt_regs *amd64_keyboard_interrupt(struct pt_regs *regs) {
   uint8_t scancode = inb(0x60);
   /* TODO: Send scancode to keyboard driver / generic input queue */
   (void)scancode;
   pic_send_eoi(1);
+  return regs;
 }

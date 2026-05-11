@@ -209,9 +209,8 @@ static void init_scheduler(void) {
       
       /* Explicitly initialize context to known state */
       memset(idle->context, 0, sizeof(struct pt_regs));
-      idle->context->elr = (uint64_t)idle_task_entry;
-      idle->context->spsr = 0x05; /* EL1h + Unmasked */
-      idle->context->sp_el0 = 0;
+      pt_regs_init_kernel_task(idle->context, (uint64_t)idle_task_entry,
+                               idle->kernel_stack);
 
       /* CRITICAL: Flush idle task context frame and the process struct itself to POC */
       arch_cache_clean_range(idle, sizeof(struct process));

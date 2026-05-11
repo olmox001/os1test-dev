@@ -95,4 +95,25 @@ static inline void pt_regs_set_user_sp(struct pt_regs *r, uint64_t v) {
 /* Retry syscall: rewind PC by 2 bytes (syscall instruction is 0F 05) */
 static inline void pt_regs_retry_syscall(struct pt_regs *r) { r->rip -= 2; }
 
+/* Initialize context for a user-mode process (ELF entry)
+ * GDT_USER_CODE=0x20 → selector 0x23 (ring3), GDT_USER_DATA=0x18 → 0x1B */
+static inline void pt_regs_init_user_task(struct pt_regs *r, uint64_t entry,
+                                           uint64_t usp) {
+  r->rip    = entry;
+  r->rsp    = usp;
+  r->rflags = 0x202;  /* IF + reserved */
+  r->cs     = 0x23;   /* user code segment, ring 3 */
+  r->ss     = 0x1B;   /* user data segment, ring 3 */
+}
+
+/* Initialize context for a kernel-mode thread */
+static inline void pt_regs_init_kernel_task(struct pt_regs *r, uint64_t entry,
+                                             uint64_t ksp) {
+  r->rip    = entry;
+  r->cs     = 0x08;   /* kernel code segment */
+  r->rflags = 0x202;  /* IF + reserved */
+  r->rsp    = ksp;
+  r->ss     = 0x10;   /* kernel data segment */
+}
+
 #endif /* _ARCH_AMD64_PT_REGS_H */

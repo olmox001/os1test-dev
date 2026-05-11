@@ -52,6 +52,7 @@ BUILD_DIR  = build
 USER_DIR   = user
 USER_LIB_DIR = $(USER_DIR)/lib
 USER_BIN_DIR = $(USER_DIR)/bin
+USER_ARCH_DIR = $(USER_DIR)/arch/$(ARCH)
 INCLUDE    = -I$(KERNEL_DIR)/include -I$(ARCH_DIR)/include -Iinclude/api
 
 # Output files
@@ -130,6 +131,7 @@ endif
 
 KERN_C_SOURCES += \
     $(KERNEL_DIR)/core/syscall_dispatch.c \
+    $(KERNEL_DIR)/core/timer.c \
     $(KERNEL_DIR)/drivers/console.c \
     $(KERNEL_DIR)/drivers/irq_ctrl.c \
     $(KERNEL_DIR)/drivers/sys_timer.c \
@@ -232,6 +234,7 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/lib
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/bin
+	@mkdir -p $(BUILD_DIR)/$(USER_ARCH_DIR)
 
 
 # ==============================================================================
@@ -273,9 +276,11 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 # Userland
 # ==============================================================================
 
+USER_SYSCALL_O = $(BUILD_DIR)/$(USER_ARCH_DIR)/syscall.o
+
 USER_ELFS = $(BUILD_DIR)/init.elf $(BUILD_DIR)/counter.elf $(BUILD_DIR)/shell.elf \
             $(BUILD_DIR)/demo3d.elf $(BUILD_DIR)/ipc_send.elf $(BUILD_DIR)/ipc_recv.elf \
-            $(BUILD_DIR)/notification_server.elf $(BUILD_DIR)/crash.elf $(BUILD_DIR)/regedit.elf \
+            $(BUILD_DIR)/notify_srv.elf $(BUILD_DIR)/crash.elf $(BUILD_DIR)/regedit.elf \
             $(BUILD_DIR)/writetest.elf
 
 user: $(USER_ELFS)
@@ -304,55 +309,55 @@ $(BUILD_DIR)/$(USER_DIR)/bin/%.o: $(USER_DIR)/bin/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(USER_ELF): $(USER_OBJ) $(BUILD_DIR)/$(USER_LIB_DIR)/syscall.o
+$(USER_ELF): $(USER_OBJ) $(USER_SYSCALL_O)
 	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
 	@echo "Userland init size: $$(stat -f%z $@ 2>/dev/null || stat -c%s $@ 2>/dev/null) bytes"
 
-$(BUILD_DIR)/counter.elf: $(COUNTER_OBJ) $(BUILD_DIR)/$(USER_LIB_DIR)/syscall.o
+$(BUILD_DIR)/counter.elf: $(COUNTER_OBJ) $(USER_SYSCALL_O)
 	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
 	@echo "Userland counter size: $$(stat -f%z $@ 2>/dev/null || stat -c%s $@ 2>/dev/null) bytes"
 
-$(BUILD_DIR)/shell.elf: $(SHELL_OBJ) $(BUILD_DIR)/$(USER_LIB_DIR)/syscall.o
+$(BUILD_DIR)/shell.elf: $(SHELL_OBJ) $(USER_SYSCALL_O)
 	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
 	@echo "Userland shell size: $$(stat -f%z $@ 2>/dev/null || stat -c%s $@ 2>/dev/null) bytes"
 
-$(BUILD_DIR)/demo3d.elf: $(DEMO3D_OBJ) $(BUILD_DIR)/$(USER_LIB_DIR)/syscall.o
+$(BUILD_DIR)/demo3d.elf: $(DEMO3D_OBJ) $(USER_SYSCALL_O)
 	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
 	@echo "Userland demo3d size: $$(stat -f%z $@ 2>/dev/null || stat -c%s $@ 2>/dev/null) bytes"
 
 # IPC Send
 IPC_SEND_SRC = $(USER_BIN_DIR)/ipc_send.c $(USER_LIB_DIR)/lib.c
 IPC_SEND_OBJ = $(IPC_SEND_SRC:%.c=$(BUILD_DIR)/%.o)
-$(BUILD_DIR)/ipc_send.elf: $(IPC_SEND_OBJ) $(BUILD_DIR)/$(USER_LIB_DIR)/syscall.o
+$(BUILD_DIR)/ipc_send.elf: $(IPC_SEND_OBJ) $(USER_SYSCALL_O)
 	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
 
 # IPC Recv
 IPC_RECV_SRC = $(USER_BIN_DIR)/ipc_recv.c $(USER_LIB_DIR)/lib.c
 IPC_RECV_OBJ = $(IPC_RECV_SRC:%.c=$(BUILD_DIR)/%.o)
-$(BUILD_DIR)/ipc_recv.elf: $(IPC_RECV_OBJ) $(BUILD_DIR)/$(USER_LIB_DIR)/syscall.o
+$(BUILD_DIR)/ipc_recv.elf: $(IPC_RECV_OBJ) $(USER_SYSCALL_O)
 	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
 
 # Notification Server
 NOTIFY_SRC = $(USER_BIN_DIR)/notification_server.c $(USER_LIB_DIR)/lib.c
 NOTIFY_OBJ = $(NOTIFY_SRC:%.c=$(BUILD_DIR)/%.o)
-$(BUILD_DIR)/notification_server.elf: $(NOTIFY_OBJ) $(BUILD_DIR)/$(USER_LIB_DIR)/syscall.o
+$(BUILD_DIR)/notify_srv.elf: $(NOTIFY_OBJ) $(USER_SYSCALL_O)
 	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
 # Crash Test
 CRASH_SRC = $(USER_BIN_DIR)/crash.c $(USER_LIB_DIR)/lib.c
 CRASH_OBJ = $(CRASH_SRC:%.c=$(BUILD_DIR)/%.o)
-$(BUILD_DIR)/crash.elf: $(CRASH_OBJ) $(BUILD_DIR)/$(USER_LIB_DIR)/syscall.o
+$(BUILD_DIR)/crash.elf: $(CRASH_OBJ) $(USER_SYSCALL_O)
 	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
 
 # Registry Editor
 REGEDIT_SRC = $(USER_BIN_DIR)/regedit.c $(USER_LIB_DIR)/lib.c
 REGEDIT_OBJ = $(REGEDIT_SRC:%.c=$(BUILD_DIR)/%.o)
-$(BUILD_DIR)/regedit.elf: $(REGEDIT_OBJ) $(BUILD_DIR)/$(USER_LIB_DIR)/syscall.o
+$(BUILD_DIR)/regedit.elf: $(REGEDIT_OBJ) $(USER_SYSCALL_O)
 	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
 
 # Write Test
 WRITETEST_SRC = $(USER_BIN_DIR)/writetest.c $(USER_LIB_DIR)/lib.c
 WRITETEST_OBJ = $(WRITETEST_SRC:%.c=$(BUILD_DIR)/%.o)
-$(BUILD_DIR)/writetest.elf: $(WRITETEST_OBJ) $(BUILD_DIR)/$(USER_LIB_DIR)/syscall.o
+$(BUILD_DIR)/writetest.elf: $(WRITETEST_OBJ) $(USER_SYSCALL_O)
 	$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
 
 # ==============================================================================
@@ -453,11 +458,20 @@ check:
 # Clean
 # ==============================================================================
 
-disk: $(MKDISK) kernel user bootloader
+rootfs: user
+	@echo "Preparing RootFS directory..."
+	@mkdir -p $(BUILD_DIR)/rootfs/bin
+	@mkdir -p $(BUILD_DIR)/rootfs/etc
+	@cp $(USER_ELFS) $(BUILD_DIR)/rootfs/bin/
+	@cp user/bin/init.cfg $(BUILD_DIR)/rootfs/etc/
+	@# Remove .elf extension from binaries in rootfs/bin for cleaner paths
+	@for f in $(BUILD_DIR)/rootfs/bin/*.elf; do mv "$$f" "$${f%.elf}"; done
+
+disk: $(MKDISK) kernel rootfs bootloader
 	@echo "Assembling final disk image (GPT + Ext4)..."
 	@mkdir -p $(BUILD_DIR)
-	@./$(MKDISK) $(BUILD_DIR)/disk.img $(BOOTLOADER_BIN) $(KERNEL_BIN)
 ifeq ($(ARCH), amd64)
+	@./$(MKDISK) $(BUILD_DIR)/disk.img none $(KERNEL_BIN) $(BUILD_DIR)/rootfs
 	@echo "Creating GRUB ISO..."
 	@mkdir -p $(BUILD_DIR)/iso/boot/grub
 	@cp $(KERNEL_ELF) $(BUILD_DIR)/iso/boot/kernel.elf
@@ -467,8 +481,10 @@ ifeq ($(ARCH), amd64)
 	@echo "  multiboot2 /boot/kernel.elf" >> $(BUILD_DIR)/iso/boot/grub/grub.cfg
 	@echo "  boot" >> $(BUILD_DIR)/iso/boot/grub/grub.cfg
 	@echo "}" >> $(BUILD_DIR)/iso/boot/grub/grub.cfg
-	@grub-mkrescue -o $(BUILD_DIR)/os1test.iso $(BUILD_DIR)/iso 2>/dev/null
+	@grub-mkrescue -o $(BUILD_DIR)/os1test.iso $(BUILD_DIR)/iso 2>/dev/null || echo "Warning: grub-mkrescue failed, ISO not created"
 	@echo "ISO Created: build/os1test.iso"
+else
+	@./$(MKDISK) $(BUILD_DIR)/disk.img $(BOOTLOADER_BIN) $(KERNEL_BIN) $(BUILD_DIR)/rootfs
 endif
 
 $(MKDISK): tools/mkdisk.c

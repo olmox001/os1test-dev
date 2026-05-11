@@ -10,6 +10,7 @@ ENTRY(_start)
 SECTIONS {
     /* Multiboot2 loads at 1MB */
     . = 1M;
+    __kernel_start = .;
 
     .multiboot2 : ALIGN(8) {
         KEEP(*(.multiboot2))
@@ -19,6 +20,7 @@ SECTIONS {
         *(.text.boot)
         *(.text*)
     }
+    _etext = .;
 
     .rodata : ALIGN(4096) {
         *(.rodata*)
@@ -34,6 +36,14 @@ SECTIONS {
         *(COMMON)
         _bss_end = .;
     }
+    __kernel_end = .;
+
+    /* Kernel test section (for ktest) */
+    __ktests_start = .;
+    .ktests : {
+        *(.ktests)
+    }
+    __ktests_end = .;
 
     /* Kernel stack (defined in boot.S BSS) */
     /* _stack_bottom and _stack_top are provided by boot.S */

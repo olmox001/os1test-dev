@@ -63,4 +63,21 @@ static inline void pt_regs_set_user_sp(struct pt_regs *r, uint64_t v) {
 /* Retry syscall: rewind PC by 4 bytes (ARM instruction size) */
 static inline void pt_regs_retry_syscall(struct pt_regs *r) { r->elr -= 4; }
 
+/* Initialize context for a user-mode process (ELF entry) */
+static inline void pt_regs_init_user_task(struct pt_regs *r, uint64_t entry,
+                                           uint64_t usp) {
+  r->elr    = entry;
+  r->sp_el0 = usp;
+  r->spsr   = 0; /* EL0t, IRQs unmasked */
+}
+
+/* Initialize context for a kernel-mode thread (ksp unused on AArch64) */
+static inline void pt_regs_init_kernel_task(struct pt_regs *r, uint64_t entry,
+                                             uint64_t ksp) {
+  (void)ksp;
+  r->elr  = entry;
+  r->spsr = 0x05; /* EL1h, IRQs unmasked */
+  r->sp_el0 = 0;
+}
+
 #endif /* _ARCH_AARCH64_PT_REGS_H */

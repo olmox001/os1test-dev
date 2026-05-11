@@ -7,11 +7,13 @@
 
 /* --- CPU and Interrupt HAL --- */
 #define arch_get_cpu_id() __arch_get_cpu_id()
+struct process;
 void arch_cpu_init(void);
 int arch_cpu_wake_secondary(uint64_t cpu_id, void (*entry)(void), void *stack);
 void arch_enter_user_mode(uint64_t entry, uint64_t stack, uint64_t ksp);
 uint64_t arch_get_boot_info(void);
 void *arch_get_kernel_stack(uint32_t cpu_id);
+void arch_cpu_switch_context(struct process *next);
 void arch_vmm_set_secondary_pgd(uint64_t pgd);
 
 #define arch_local_irq_enable() __arch_local_irq_enable()
@@ -39,7 +41,6 @@ int arch_copy_string_from_user(char *dest, const char *src, size_t max_len);
 #define arch_nop() __arch_nop()
 #define arch_idle() __arch_wfi() /* Wait for Interrupt / HLT */
 #define arch_yield() __arch_yield()
-#define arch_get_cpu_id() __arch_get_cpu_id()
 #define arch_cpu_halt() __arch_cpu_halt()
 
 /* --- Memory & Execution Barriers --- */

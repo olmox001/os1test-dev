@@ -77,6 +77,7 @@ syscall_entry:
     /* Call C handler */
     movq %rsp, %rdi
     call kernel_syscall_dispatcher
+    movq %rax, %rsp
 
     /* Restore registers */
     popq %r15

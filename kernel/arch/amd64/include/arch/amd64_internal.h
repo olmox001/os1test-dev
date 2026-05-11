@@ -15,8 +15,8 @@ void pic_init(void);
 void pic_send_eoi(uint8_t irq);
 void pit_init(void);
 void uart_init(void);
-void amd64_timer_interrupt(void);
-void amd64_keyboard_interrupt(void);
+struct pt_regs *amd64_timer_interrupt(struct pt_regs *regs);
+struct pt_regs *amd64_keyboard_interrupt(struct pt_regs *regs);
 
 uint64_t timer_get_us(void);
 void udelay(uint32_t us);

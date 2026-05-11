@@ -176,3 +176,9 @@ void arch_vmm_set_secondary_pgd(uint64_t pgd) {
     arch_cache_clean_va(&secondary_ttbr0);
     arch_data_barrier();
 }
+
+void arch_cpu_switch_context(struct process *next) {
+    (void)next;
+    /* AArch64 switch is handled by returning the new context frame to the
+     * assembly exit code, which restores SP_EL1. SP_EL0 is in pt_regs. */
+}

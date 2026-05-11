@@ -128,3 +128,27 @@ void udelay(uint32_t us) {
 void arch_pci_init(void) {
   /* Minimal stub */
 }
+
+/* Secondary CPU boot support (not implemented for single-core) */
+void arch_vmm_set_secondary_pgd(uint64_t pgd) {
+  (void)pgd;
+}
+
+/* Get kernel stack for a CPU (not implemented) */
+void *arch_get_kernel_stack(uint32_t cpu_id) {
+  (void)cpu_id;
+  return NULL;
+}
+
+/* Wake secondary CPU (not implemented) */
+int arch_cpu_wake_secondary(uint64_t cpu_id, void (*entry)(void), void *stack) {
+  (void)cpu_id;
+  (void)entry;
+  (void)stack;
+  return -1; /* Not implemented */
+}
+
+/* Get boot information from Multiboot2 */
+uint64_t arch_get_boot_info(void) {
+  return (uint64_t)mb_info_ptr;
+}

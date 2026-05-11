@@ -99,8 +99,8 @@ static void amd64_double_fault_handler(struct pt_regs *regs) {
 }
 
 extern struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *regs);
-extern void amd64_timer_interrupt(void);
-extern void amd64_keyboard_interrupt(void);
+extern struct pt_regs *amd64_timer_interrupt(struct pt_regs *regs);
+extern struct pt_regs *amd64_keyboard_interrupt(struct pt_regs *regs);
 
 /* Main Exception/Interrupt Dispatcher (called from isr_stubs.S) */
 struct pt_regs *amd64_isr_dispatch(struct pt_regs *regs) {
@@ -119,11 +119,9 @@ struct pt_regs *amd64_isr_dispatch(struct pt_regs *regs) {
     case 0x80: /* Legacy syscall (if used) */
       return kernel_syscall_dispatcher(regs);
     case 32: /* PIT Timer */
-      amd64_timer_interrupt();
-      break;
+      return amd64_timer_interrupt(regs);
     case 33: /* Keyboard */
-      amd64_keyboard_interrupt();
-      break;
+      return amd64_keyboard_interrupt(regs);
     default:
       if (vec < 32) {
         pr_err("Unhandled CPU Exception: %ld\n", vec);
@@ -131,6 +129,8 @@ struct pt_regs *amd64_isr_dispatch(struct pt_regs *regs) {
         __arch_cpu_halt();
       } else {
         /* Hardware interrupt - to be routed via APIC/PIC */
+        extern void pic_send_eoi(uint8_t irq);
+        pic_send_eoi(vec - 32);
       }
       break;
   }

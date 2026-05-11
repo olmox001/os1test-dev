@@ -4,7 +4,9 @@
  */
 #include <kernel/cpu.h>
 #include <kernel/printk.h>
+#include <kernel/sched.h>
 #include <kernel/string.h>
+#include <arch/amd64_internal.h>
 
 extern void gdt_init(void);
 extern void idt_init(void);
@@ -45,4 +47,15 @@ struct cpu_info *get_cpu_info(void) {
    * For SMP, we would read the LAPIC ID and index an array.
    */
   return &boot_cpu;
+}
+
+void arch_cpu_switch_context(struct process *next) {
+  struct cpu_info *cpu = get_cpu_info();
+  
+  /* Update per-CPU data for assembly stubs (syscall.S / isr_stubs.S) */
+  cpu->stack_top = next->kernel_stack;
+  cpu->current_task = next;
+
+  /* Update TSS RSP0 for interrupt stack switching */
+  gdt_set_rsp0(next->kernel_stack);
 }

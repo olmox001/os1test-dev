@@ -111,6 +111,7 @@ common_isr_entry:
     /* Pass pointer to pt_regs as first argument */
     movq  %rsp, %rdi
     call  amd64_isr_dispatch
+    movq  %rax, %rsp
 
     /* Restore GP registers */
     popq  %r15
