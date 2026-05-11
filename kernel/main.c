@@ -41,7 +41,11 @@ static void init_scheduler(void);
  * Kernel main entry point
  */
 /* Forward declaration for kernel_main */
+#ifdef ARCH_AMD64
+void kernel_main(uint32_t mb_info_ptr_arg);
+#else
 void kernel_main(void);
+#endif
 extern void timer_init_percpu(void);
 
 /* Kernel entry point - receives multiboot info pointer from bootloader */
