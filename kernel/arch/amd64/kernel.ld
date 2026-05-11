@@ -1,53 +1,50 @@
 /*
  * kernel/arch/amd64/kernel.ld — x86-64 Linker Script
- * Kernel loaded at 1MB by Multiboot2
+ * Link as 32-bit ELF to satisfy Multiboot loaders.
  */
 
-OUTPUT_FORMAT("elf64-x86-64")
+OUTPUT_FORMAT("elf32-i386")
 OUTPUT_ARCH(i386:x86-64)
-ENTRY(_start)
+ENTRY(_start_32)
 
 SECTIONS {
-    /* Multiboot2 loads at 1MB */
     . = 1M;
     __kernel_start = .;
 
-    .multiboot : ALIGN(16) {
+    .multiboot : ALIGN(8) {
         KEEP(*(.multiboot))
-        KEEP(*(.multiboot2))
     }
 
     .text : ALIGN(4096) {
+        _text = .;
         *(.text.boot)
         *(.text*)
+        _etext = .;
     }
-    _etext = .;
 
     .rodata : ALIGN(4096) {
+        _rodata = .;
         *(.rodata*)
+        . = ALIGN(8);
+        __ktests_start = .;
+        KEEP(*(.ktests))
+        __ktests_end = .;
+        _erodata = .;
     }
 
     .data : ALIGN(4096) {
+        _data = .;
         *(.data*)
+        _edata = .;
     }
 
     .bss : ALIGN(4096) {
-        _bss_start = .;
+        __bss_start = .;
         *(.bss*)
         *(COMMON)
-        _bss_end = .;
+        __bss_end = .;
     }
     __kernel_end = .;
-
-    /* Kernel test section (for ktest) */
-    __ktests_start = .;
-    .ktests : {
-        *(.ktests)
-    }
-    __ktests_end = .;
-
-    /* Kernel stack (defined in boot.S BSS) */
-    /* _stack_bottom and _stack_top are provided by boot.S */
 
     /DISCARD/ : {
         *(.comment)
@@ -55,3 +52,5 @@ SECTIONS {
         *(.eh_frame*)
     }
 }
+
+PROVIDE(__kernel_size = __kernel_end - __kernel_start);

@@ -105,9 +105,7 @@ ifeq ($(ARCH), amd64)
 BOOT_SOURCES = \
     $(BOOT_DIR)/header.S \
     $(BOOT_DIR)/stage1.S \
-    $(BOOT_DIR)/stage2.S \
-    $(BOOT_DIR)/main.c \
-    $(BOOT_DIR)/serial.c
+    $(BOOT_DIR)/stage2.S
 
 KERN_ASM_SOURCES = \
     $(ARCH_DIR)/boot/start.S \
@@ -187,9 +185,8 @@ KERN_CPP_SOURCES = \
 
 
 # Object files
-# Unified BOOT_OBJECTS for both assembly and C sources
-BOOT_OBJECTS = $(patsubst %.S,$(BUILD_DIR)/%.o,$(filter %.S,$(BOOT_SOURCES))) \
-               $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(BOOT_SOURCES)))
+# Object files
+BOOT_OBJECTS = $(patsubst %.S,$(BUILD_DIR)/%.o,$(BOOT_SOURCES))
 KERN_ASM_OBJECTS = $(KERN_ASM_SOURCES:%.S=$(BUILD_DIR)/%.o)
 KERN_C_OBJECTS = $(KERN_C_SOURCES:%.c=$(BUILD_DIR)/%.o)
 # KERN_CPP_OBJECTS = $(KERN_CPP_SOURCES:%.cpp=$(BUILD_DIR)/%.o)
@@ -398,11 +395,6 @@ $(BUILD_DIR)/user/%.o: user/%.c
 	@echo "CC  $<"
 	@$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
-# Compile Bootloader C files (Special 32-bit handling for AMD64)
-$(BUILD_DIR)/boot/amd64/%.o: boot/amd64/%.c
-	@mkdir -p $(dir $@)
-	@echo "CC (32-bit) $<"
-	@$(CC) $(CFLAGS_BOOT) -MMD -MP -c -o $@ $<
 
 # Default C rule
 $(BUILD_DIR)/%.o: %.c

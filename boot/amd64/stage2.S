@@ -1,6 +1,7 @@
 /*
  * boot/amd64/stage2.S
  * AMD64 Bootloader - Stage 2 (64-bit)
+ * Parity with aarch64 implementation
  */
 
 .code64
@@ -19,22 +20,33 @@ stage2_entry_trampoline:
     /* Setup Stage 2 Stack */
     movq $__stage2_stack_top, %rsp
 
-    /* Pass magic and info pointer to stage2_main(magic, info) */
-    movl (multiboot_magic), %edi
-    movl (multiboot_info_ptr), %esi
+    /* Setup kernel environment */
+    call setup_kernel_environment
+    
+    /* Jump to kernel entry point */
+    movq (kernel_entry_point), %rax
+    testq %rax, %rax
+    jz .halt
+    
+    /* Pass Multiboot2 info in RDI (standard for our kernel) */
+    movl (multiboot_info_ptr), %edi
+    jmp *%rax
 
-    /* Call stage2 main logic */
-    call stage2_main
-
-    /* Should not return */
-    cli
 .halt:
+    cli
+.halt_loop:
     hlt
-    jmp .halt
+    jmp .halt_loop
 
-
+setup_kernel_environment:
+    /* Minimal for now, parity with aarch64 */
+    ret
 
 .section .bss
 .align 16
 __stage2_stack: .skip 16384
 __stage2_stack_top:
+
+/* Symbols defined in stage1.S */
+.extern kernel_entry_point
+.extern multiboot_info_ptr

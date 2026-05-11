@@ -1,6 +1,7 @@
 /*
  * boot/amd64/header.S
  * Multiboot2 Header for AMD64
+ * Parity with aarch64 implementation
  */
 
 .set MB2_MAGIC,        0xE85250D6
@@ -16,11 +17,11 @@ mb2_header_start:
     .long MB2_HEADER_LEN
     .long MB2_CHECKSUM
 
-    /* Entry Address Tag */
+    /* Entry Address Tag (Type 5) */
     .short 5            /* type */
     .short 0            /* flags */
-    .long 12            /* size */
-    .long _start        /* entry_addr (32-bit) */
+    .long 16            /* size (2+2+4+8 = 16) */
+    .quad _start        /* entry point (64-bit) */
 
     /* End Tag */
     .short 0
