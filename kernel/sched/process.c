@@ -338,7 +338,6 @@ int process_terminate(int pid) {
 
   /* If we are terminating OURSELVES */
   if (current_process == proc) {
-    pr_err("SCHED: PID %d going ZOMBIE (self-terminate)\n", pid);
     proc->state = PROC_ZOMBIE;
 
     /* If this is a user process without a parent or it is a system-level init,
@@ -364,7 +363,6 @@ int process_terminate(int pid) {
     }
   }
 
-  pr_err("SCHED: PID %d going DEAD (external terminate)\n", pid);
   proc->state = PROC_DEAD;
 
   if (proc->on_cpu >= 0) {
@@ -652,7 +650,6 @@ int process_wait(int pid) {
     struct process *proc = process_pool[i];
     if (proc && (int)proc->pid == pid) {
       if (proc->state == PROC_DEAD || proc->state == PROC_ZOMBIE) {
-        pr_err("WAIT: PID %d found dead/zombie (state=%d)\n", pid, proc->state);
         if (proc->state == PROC_ZOMBIE) {
           /* Now we can safely free the zombie's resources */
           pr_info("Reaping zombie process %d\n", pid);
