@@ -423,9 +423,11 @@ ifeq ($(ARCH), amd64)
 QEMU = qemu-system-x86_64
 QEMU_FLAGS = -m 1G -smp 4 -serial mon:stdio \
              -display default,show-cursor=on \
-             -device virtio-gpu-pci \
-             -device virtio-keyboard-pci -device virtio-mouse-pci \
-             -drive if=none,file=$(BUILD_DIR)/disk.img,id=hd0,format=raw -device virtio-blk-pci,drive=hd0
+             -device virtio-gpu-pci,disable-legacy=on,disable-modern=off \
+             -device virtio-keyboard-pci,disable-legacy=on,disable-modern=off \
+             -device virtio-mouse-pci,disable-legacy=on,disable-modern=off \
+             -drive if=none,file=$(BUILD_DIR)/disk.img,id=hd0,format=raw \
+             -device virtio-blk-pci,drive=hd0,disable-legacy=on,disable-modern=off
 else
 QEMU = qemu-system-aarch64
 QEMU_FLAGS = -M virt -cpu cortex-a57 -m 2G -smp 4 -serial mon:stdio \

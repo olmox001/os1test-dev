@@ -261,8 +261,8 @@ struct process *process_create(const char *name, uint8_t priority,
 
   proc->page_table = vmm_create_pgd();
 
-  pr_info("process_create: '%s' PID=%d slot=%d Prio=%d TTBR0=0x%lx\n", name,
-          proc->pid, slot, proc->priority, virt_to_phys(proc->page_table));
+  pr_info("process_create: '%s' PID=%d slot=%d Prio=%d PageTable=0x%lx\n", name,
+          proc->pid, slot, proc->priority, (uint64_t)proc->page_table);
 
   /* Allocate and Setup Kernel Stack (16KB) */
   void *kstack_base = pmm_alloc_pages(STACK_SIZE / 4096);

@@ -188,21 +188,11 @@ uint64_t arch_vmm_create_process_pgd(void) {
 
   memset((void *)new_pml4, 0, PAGE_SIZE);
 
-  /* Copy kernel space mappings (upper half of PML4: indices 256-511)
-   * Since our kernel is at 1MB (lower half), we must copy identity mapping for
-   * now. To keep it simple: just copy the whole boot_pml4 and clear the user
-   * space part. Wait, os1test user space loads at 0x400000. That's index 0. We
-   * can copy the entire boot_pml4, which covers kernel at 0-1GB. Then map user
-   * space. It will overlap if user space uses the 0-1GB range! BUT! os1test
-   * processes load at 0x400000 (4MB). This is within the first 1GB. In aarch64
-   * we had TTBR0 and TTBR1. On x86-64 it's unified. To avoid the overlap, user
-   * space must not use the same VA as the kernel. We will map user programs
-   * where they request, since we identity map the kernel, we MUST NOT clear the
-   * first entry. However, if user space writes to kernel space it would fault
-   * if we set kernel pages to Supervisor-only (which we haven't strictly done
-   * in boot.S yet).
+  /* Copy kernel space mappings from the fully-initialized kernel_pgd.
+   * This includes RAM identity maps and MMIO ranges.
    */
-  memcpy((void *)new_pml4, boot_pml4, PAGE_SIZE);
+  extern uint64_t *kernel_pgd;
+  memcpy((void *)new_pml4, kernel_pgd, PAGE_SIZE);
 
   return new_pml4;
 }

@@ -133,33 +133,35 @@ static void virtio_pci_callback(int bdf, uint16_t vendor, uint16_t device_id) {
     return;
 
   struct virtio_device *vdev = &virtio_devices[virtio_dev_count];
+  
+  /* Modern devices have ID 0x1040-0x107F. Legacy have 0x1000-0x103F. */
+  bool is_modern = (device_id >= 0x1041); /* 0x1041 is block, 0x1042 is console, etc. */
+  
   uint32_t bar0 = pci_get_bar(bdf, 0);
+  uint32_t bar4 = pci_get_bar(bdf, 4);
 
-  if (bar0 & 1) { /* Legacy Port I/O */
+  if (is_modern && bar4 != 0 && !(bar4 & 1)) {
+    vdev->base = bar4 & ~0xF;
+    vdev->ops = &modern_ops;
+    vdev->device_id = device_id - 0x1040;
+    pr_info("VirtIO: Found Modern device (PCI) at MMIO 0x%lx, ID %d\n", vdev->base,
+            vdev->device_id);
+  } else if (bar0 & 1) { /* Legacy Port I/O */
     vdev->base = bar0 & ~3;
     vdev->ops = &legacy_ops;
-    /* Subsystem Device ID at 0x2C */
-    uint32_t sub_id =
-        pci_config_read((bdf >> 16) & 0xFF, (bdf >> 8) & 0xFF, bdf & 0x7, 0x2C);
+    /* Subsystem Device ID at 0x2C is used for legacy device type */
+    uint32_t sub_id = pci_config_read((bdf >> 16) & 0xFF, (bdf >> 8) & 0xFF, bdf & 0x7, 0x2C);
     vdev->device_id = sub_id >> 16;
-    pr_info("VirtIO: Found Legacy device at I/O 0x%lx, ID %d\n", vdev->base,
+    pr_info("VirtIO: Found Legacy device (PCI) at I/O 0x%lx, ID %d\n", vdev->base,
             vdev->device_id);
-  } else {                                  /* Modern MMIO (Simplified) */
-    uint32_t bar_val = pci_get_bar(bdf, 4); /* Try BAR4 for modern? Or BAR0? */
-    if (bar_val == 0)
-      bar_val = pci_get_bar(bdf, 0);
-
-    if (bar_val == 0) {
-      pr_warn("VirtIO: Skipping modern device %04x with no BAR assigned\n",
-              device_id);
-      return;
-    }
-
-    vdev->base = bar_val & ~0xF;
+  } else if (bar0 != 0) { /* Modern MMIO on BAR0? */
+    vdev->base = bar0 & ~0xF;
     vdev->ops = &modern_ops;
-    vdev->device_id = (device_id >= 0x1040) ? (device_id - 0x1040) : device_id;
-    pr_info("VirtIO: Found Modern device at MMIO 0x%lx, ID %d\n", vdev->base,
+    vdev->device_id = is_modern ? (device_id - 0x1040) : device_id;
+    pr_info("VirtIO: Found Modern device (PCI) at MMIO 0x%lx, ID %d\n", vdev->base,
             vdev->device_id);
+  } else {
+    return;
   }
 
   vdev->irq = 32 + pci_get_interrupt(bdf);

@@ -14,6 +14,7 @@ void arch_vmm_init(void);
 void pic_init(void);
 void pic_send_eoi(uint8_t irq);
 void pic_unmask(uint8_t irq);
+void pic_mask(uint8_t irq);
 void pit_init(void);
 void uart_init(void);
 struct pt_regs *amd64_timer_interrupt(struct pt_regs *regs);

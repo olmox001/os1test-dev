@@ -5,6 +5,8 @@
 #include <kernel/types.h>
 
 /* AMD64 HAL Implementation Primitives */
+#include <kernel/elf.h>
+#define ARCH_TYPE EM_X86_64
 
 /* --- Interrupt Control --- */
 static inline void arch_impl_irq_enable(void) {

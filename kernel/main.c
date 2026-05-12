@@ -89,6 +89,7 @@ void kernel_main(uint64_t x0_arg) {
 
   /* Platform-specific hardware registration */
   arch_platform_early_init();
+  pr_info("%s", "Initializing IRQ...\n");
   driver_irq_init();
   irq_init();
   irq_init_percpu();
@@ -103,9 +104,11 @@ void kernel_main(uint64_t x0_arg) {
   init_memory();
 
   /* Process subsystem initialization (locks, etc.) */
+  pr_info("%s", "Initializing processes...\n");
   process_init();
 
   /* Scheduler and First Process */
+  pr_info("%s", "Initializing scheduler...\n");
   init_scheduler();
 
   /* Set CPU0 current task to idle (placeholder) to allow scheduling? */

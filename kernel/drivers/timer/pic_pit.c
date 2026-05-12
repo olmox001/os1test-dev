@@ -22,19 +22,32 @@ extern volatile uint64_t jiffies;
 extern void timer_tick(void); /* generic scheduler tick */
 void pit_init_hz(uint32_t hz);
 
+void pic_unmask(uint8_t irq);
+void pic_mask(uint8_t irq);
+
 static void pic_chip_enable(uint32_t irq) {
-    /* PIC IRQs are 0-15. Input is 32+irq usually? 
-       Wait, the generic system uses the absolute IRQ number. 
-       On AMD64, we map IRQ 0-15 to 32-47. */
     if (irq >= 32 && irq < 48) {
-        extern void pic_unmask(uint8_t irq);
         pic_unmask(irq - 32);
     }
 }
 
+void pic_mask(uint8_t irq) {
+    uint16_t port;
+    uint8_t value;
+    if (irq < 8) {
+        port = PIC1_DATA;
+    } else {
+        port = PIC2_DATA;
+        irq -= 8;
+    }
+    value = inb(port) | (1 << irq);
+    outb(port, value);
+}
+
 static void pic_chip_disable(uint32_t irq) {
-    /* TODO: implement mask if needed */
-    (void)irq;
+    if (irq >= 32 && irq < 48) {
+        pic_mask(irq - 32);
+    }
 }
 
 static uint32_t pic_chip_acknowledge(void) {
@@ -73,9 +86,9 @@ void pic_init(void) {
   outb(PIC1_DATA, 0x01); /* ICW4: 8086 mode */
   outb(PIC2_DATA, 0x01);
   
-  /* Start with all IRQs unmasked for debug */
-  outb(PIC1_DATA, 0x00);
-  outb(PIC2_DATA, 0x00);
+  /* Start with all IRQs masked except slave cascade (IRQ 2) */
+  outb(PIC1_DATA, 0xFB);
+  outb(PIC2_DATA, 0xFF);
   
   pr_info("PIC Initialized and remapped to 32-47.\n");
 }

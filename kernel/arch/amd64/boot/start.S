@@ -52,26 +52,20 @@ mb2_header_end:
 .global _start_32
 _start_32:
     cli
-    /* Save magic and info in a safe physical memory location (0x7FF0-0x7FFF) */
-    movl %eax, 0x7FF0
+    /* Save magic and info in registers (ebp, edx) to survive mode switch */
+    movl %eax, %ebp
+    movl %ebx, %edx
     
-    /* Detect boot protocol */
+    /* Detect PVH */
     cmpl $0x336ec578, %eax
-    je .pvh_info_32
-    
-    /* Multiboot path */
-    movl %ebx, 0x7FF8
-    jmp .prepare_paging
+    jne .multiboot_path
+    movl %esi, %edx /* PVH info is in esi */
 
-.pvh_info_32:
-    movl %esi, 0x7FF8
-    jmp .prepare_paging
-
-.prepare_paging:
+.multiboot_path:
     /* Clear boot page tables */
     movl $boot_pml4, %edi
     xorl %eax, %eax
-    movl $3072, %ecx /* PML4 + PDPT + PD (12KB) */
+    movl $3072, %ecx /* PML4 + PDPT + PD */
     rep stosl
 
     /* Identity Map first 1GB with 2MB pages */
@@ -141,16 +135,20 @@ _start_64:
     orw  $(3 << 9), %ax  /* OSFXSR | OSXMMEXCPT */
     movq %rax, %cr4
 
-    /* Clear BSS */
+    /* 4. Clear BSS */
     movabsq $__bss_start, %rdi
     movabsq $__bss_end, %rcx
-.bss_loop:
-    cmpq %rcx, %rdi
-    jae .bss_done
-    movb $0, (%rdi)
-    incq %rdi
-    jmp .bss_loop
+    subq %rdi, %rcx
+    jz .bss_done
+    xorq %rax, %rax
+    rep stosb
 .bss_done:
+
+    /* 5. Load saved boot information into kernel variables */
+    movl %ebp, %eax
+    movq %rax, mb_magic(%rip)
+    movl %edx, %eax
+    movq %rax, mb_info_ptr(%rip)
 
     /* Setup initial stack (CPU 0) */
     movabsq $__kernel_stack, %rsp
@@ -159,12 +157,6 @@ _start_64:
 
     /* Load final 64-bit GDT */
     lgdt (boot_gdtr)
-
-    /* 5. Load saved boot information into kernel variables */
-    movl 0x7FF0, %eax
-    movq %rax, mb_magic(%rip)
-    movl 0x7FF8, %eax
-    movq %rax, mb_info_ptr(%rip)
     
     /* 6. Handover to C: RDI = info, RSI = magic */
     movq mb_info_ptr(%rip), %rdi

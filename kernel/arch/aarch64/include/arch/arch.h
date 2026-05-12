@@ -5,6 +5,8 @@
 #include <kernel/types.h>
 
 /* AArch64 HAL Implementation Primitives */
+#include <kernel/elf.h>
+#define ARCH_TYPE EM_AARCH64
 
 /* --- Interrupt Control --- */
 static inline void arch_impl_irq_enable(void) {
@@ -212,7 +214,7 @@ static inline int arch_impl_spin_trylock(volatile uint32_t *lock) {
 
 /* --- Constants --- */
 #define HAL_RAM_START 0x40000000UL
-#define HAL_RAM_SIZE  0x40000000UL /* 1GB default */
+#define HAL_RAM_SIZE  0x80000000UL /* 2GB */
 #define HAL_ALIAS_OFFSET 0x40000000UL
 
 #endif /* _ARCH_AARCH64_H */
