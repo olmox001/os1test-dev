@@ -1,6 +1,6 @@
 #include <drivers/pci.h>
 #include <drivers/virtio.h>
-#include <kernel/arch.h>
+#include <kernel/hal.h>
 #include <kernel/printk.h>
 #include <kernel/string.h>
 #include <kernel/vmm.h>
@@ -68,14 +68,14 @@ static uint32_t modern_read32(struct virtio_device *dev, uint32_t offset) {
   uint32_t mod_off = translate_modern(offset);
   if (mod_off == 0xFFFFFFFF)
     return 0;
-  return *(volatile uint32_t *)(dev->base + mod_off);
+  return hal_read32(dev->base + mod_off);
 }
 
 static void modern_write32(struct virtio_device *dev, uint32_t offset,
                            uint32_t val) {
   uint32_t mod_off = translate_modern(offset);
   if (mod_off != 0xFFFFFFFF) {
-    *(volatile uint32_t *)(dev->base + mod_off) = val;
+    hal_write32(dev->base + mod_off, val);
   }
 }
 
@@ -84,7 +84,7 @@ static void modern_notify(struct virtio_device *dev, uint32_t queue_idx) {
   if (notify_base == 0)
     notify_base = dev->base + 0x3000; /* Fallback for QEMU default */
   /* Simplified notify for now */
-  *(volatile uint16_t *)notify_base = (uint16_t)queue_idx;
+  hal_write16(notify_base, (uint16_t)queue_idx);
 }
 
 /* Legacy (Port I/O) Implementation */
@@ -98,10 +98,10 @@ static uint32_t legacy_read32(struct virtio_device *dev, uint32_t offset) {
     return 0;
   uint16_t port = (uint16_t)dev->base + pci_off;
   if (pci_off == 0x12 || pci_off == 0x13)
-    return inb(port);
+    return hal_read8(port);
   if (pci_off == 0x0C || pci_off == 0x0E || pci_off == 0x10)
-    return inw(port);
-  return inl(port);
+    return hal_read16(port);
+  return hal_read32(port);
 }
 
 static void legacy_write32(struct virtio_device *dev, uint32_t offset,
@@ -111,15 +111,15 @@ static void legacy_write32(struct virtio_device *dev, uint32_t offset,
     return;
   uint16_t port = (uint16_t)dev->base + pci_off;
   if (pci_off == 0x12 || pci_off == 0x13)
-    outb(port, (uint8_t)val);
+    hal_write8(port, (uint8_t)val);
   else if (pci_off == 0x0C || pci_off == 0x0E || pci_off == 0x10)
-    outw(port, (uint16_t)val);
+    hal_write16(port, (uint16_t)val);
   else
-    outl(port, val);
+    hal_write32(port, val);
 }
 
 static void legacy_notify(struct virtio_device *dev, uint32_t queue_idx) {
-  outw((uint16_t)dev->base + 0x10, (uint16_t)queue_idx);
+  hal_write16((uint16_t)dev->base + 0x10, (uint16_t)queue_idx);
 }
 
 static const struct virtio_transport_ops modern_ops = {
@@ -213,19 +213,19 @@ void virtio_setup_queue(virtio_handle_t dev, uint32_t queue_idx,
   if (dev->ops == &modern_ops) {
     modern_write32(dev, VIRTIO_MMIO_QUEUE_SEL, queue_idx);
     /* Modern registers: desc(0x20), avail(0x28), used(0x30) */
-    *(volatile uint32_t *)(dev->base + 0x20) = (uint32_t)desc_addr;
-    *(volatile uint32_t *)(dev->base + 0x24) = (uint32_t)(desc_addr >> 32);
-    *(volatile uint32_t *)(dev->base + 0x28) = (uint32_t)avail_addr;
-    *(volatile uint32_t *)(dev->base + 0x2C) = (uint32_t)(avail_addr >> 32);
-    *(volatile uint32_t *)(dev->base + 0x30) = (uint32_t)used_addr;
-    *(volatile uint32_t *)(dev->base + 0x34) = (uint32_t)(used_addr >> 32);
+    hal_write32(dev->base + 0x20, (uint32_t)desc_addr);
+    hal_write32(dev->base + 0x24, (uint32_t)(desc_addr >> 32));
+    hal_write32(dev->base + 0x28, (uint32_t)avail_addr);
+    hal_write32(dev->base + 0x2C, (uint32_t)(avail_addr >> 32));
+    hal_write32(dev->base + 0x30, (uint32_t)used_addr);
+    hal_write32(dev->base + 0x34, (uint32_t)(used_addr >> 32));
     /* Queue enable (0x1C) */
-    *(volatile uint32_t *)(dev->base + 0x1C) = 1;
+    hal_write32(dev->base + 0x1C, 1);
   } else {
     uint32_t pfn = (uint32_t)(desc_addr >> 12);
     pr_info("VirtIO: Setting Legacy PFN 0x%x for queue %u at 0x%lx\n", pfn,
             queue_idx, dev->base);
-    outw((uint16_t)dev->base + 0x0E, (uint16_t)queue_idx);
-    outl((uint16_t)dev->base + 0x08, pfn);
+    hal_write16((uint16_t)dev->base + 0x0E, (uint16_t)queue_idx);
+    hal_write32((uint16_t)dev->base + 0x08, pfn);
   }
 }
