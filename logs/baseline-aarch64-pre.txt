@@ -1,0 +1,139 @@
+AS  boot/aarch64/header.S
+AS  boot/aarch64/stage1.S
+AS  boot/aarch64/stage2.S
+Linking bootloader...
+aarch64-none-elf-ld -nostdlib -static -T boot/aarch64/linker.ld -o build/aarch64/bootloader.elf build/aarch64/boot/aarch64/header.o build/aarch64/boot/aarch64/stage1.o build/aarch64/boot/aarch64/stage2.o
+Bootloader size: 70816 bytes
+Creating bootloader binary...
+aarch64-none-elf-objcopy -O binary build/aarch64/bootloader.elf build/aarch64/bootloader.bin
+AS  kernel/arch/aarch64/boot/start.S
+AS  kernel/arch/aarch64/cpu/exception.S
+CC  kernel/arch/aarch64/cpu/cpu.c
+CC  kernel/arch/aarch64/cpu/syscall.c
+CC  kernel/arch/aarch64/mm/mmu.c
+CC  kernel/arch/aarch64/platform.c
+CC  kernel/arch/aarch64/virtio.c
+CC  kernel/drivers/uart/pl011.c
+CC  kernel/drivers/gic/gic.c
+CC  kernel/drivers/timer/timer.c
+CC  kernel/core/syscall_dispatch.c
+CC  kernel/core/timer.c
+CC  kernel/drivers/console.c
+CC  kernel/drivers/irq_ctrl.c
+CC  kernel/drivers/sys_timer.c
+CC  kernel/drivers/virtio/virtio_blk.c
+CC  kernel/drivers/virtio/virtio_input.c
+CC  kernel/drivers/gpu/virtio_gpu.c
+CC  kernel/drivers/gpu/gpu_core.c
+CC  kernel/drivers/keyboard/keyboard.c
+CC  kernel/fs/gpt.c
+CC  kernel/fs/ext4.c
+CC  kernel/mm/pmm.c
+CC  kernel/mm/vmm.c
+CC  kernel/mm/buffer.c
+CC  kernel/lib/string.c
+CC  kernel/lib/printk.c
+CC  kernel/lib/stack_protector.c
+CC  kernel/lib/math.c
+CC  kernel/lib/kmalloc.c
+CC  kernel/lib/registry.c
+CC  kernel/lib/ktest.c
+CC  kernel/lib/ktest_samples.c
+CC  kernel/cpu.c
+CC  kernel/sched/process.c
+CC  kernel/sched/elf.c
+CC  kernel/graphics/graphics.c
+CC  kernel/graphics/region.c
+CC  kernel/graphics/gl.c
+CC  kernel/graphics/font.c
+CC  kernel/graphics/compositor.c
+CC  kernel/irq/irq.c
+CC  kernel/lib/fdt.c
+CC  kernel/main.c
+Linking kernel...
+aarch64-none-elf-ld -nostdlib -static -T kernel/arch/aarch64/kernel.ld -Map build/kernel.map -o build/aarch64/kernel.elf build/aarch64/kernel/arch/aarch64/boot/start.o build/aarch64/kernel/arch/aarch64/cpu/exception.o build/aarch64/kernel/arch/aarch64/cpu/cpu.o build/aarch64/kernel/arch/aarch64/cpu/syscall.o build/aarch64/kernel/arch/aarch64/mm/mmu.o build/aarch64/kernel/arch/aarch64/platform.o build/aarch64/kernel/arch/aarch64/virtio.o build/aarch64/kernel/drivers/uart/pl011.o build/aarch64/kernel/drivers/gic/gic.o build/aarch64/kernel/drivers/timer/timer.o build/aarch64/kernel/core/syscall_dispatch.o build/aarch64/kernel/core/timer.o build/aarch64/kernel/drivers/console.o build/aarch64/kernel/drivers/irq_ctrl.o build/aarch64/kernel/drivers/sys_timer.o build/aarch64/kernel/drivers/virtio/virtio_blk.o build/aarch64/kernel/drivers/virtio/virtio_input.o build/aarch64/kernel/drivers/gpu/virtio_gpu.o build/aarch64/kernel/drivers/gpu/gpu_core.o build/aarch64/kernel/drivers/keyboard/keyboard.o build/aarch64/kernel/fs/gpt.o build/aarch64/kernel/fs/ext4.o build/aarch64/kernel/mm/pmm.o build/aarch64/kernel/mm/vmm.o build/aarch64/kernel/mm/buffer.o build/aarch64/kernel/lib/string.o build/aarch64/kernel/lib/printk.o build/aarch64/kernel/lib/stack_protector.o build/aarch64/kernel/lib/math.o build/aarch64/kernel/lib/kmalloc.o build/aarch64/kernel/lib/registry.o build/aarch64/kernel/lib/ktest.o build/aarch64/kernel/lib/ktest_samples.o build/aarch64/kernel/cpu.o build/aarch64/kernel/sched/process.o build/aarch64/kernel/sched/elf.o build/aarch64/kernel/graphics/graphics.o build/aarch64/kernel/graphics/region.o build/aarch64/kernel/graphics/gl.o build/aarch64/kernel/graphics/font.o build/aarch64/kernel/graphics/compositor.o build/aarch64/kernel/irq/irq.o build/aarch64/kernel/lib/fdt.o build/aarch64/kernel/main.o
+Kernel size: 603536 bytes
+Creating kernel binary...
+aarch64-none-elf-objcopy -O binary build/aarch64/kernel.elf build/aarch64/kernel.bin
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/bin/init.c -o build/aarch64/user/bin/init.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/lib/lib.c -o build/aarch64/user/lib/lib.o
+AS  user/arch/aarch64/syscall.S
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -Wl,-Ttext=0x80000000 -e _start -o build/aarch64/init.elf build/aarch64/user/bin/init.o build/aarch64/user/lib/lib.o build/aarch64/user/arch/aarch64/syscall.o
+Userland init size: 106352 bytes
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/bin/counter.c -o build/aarch64/user/bin/counter.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -Wl,-Ttext=0x80000000 -e _start -o build/aarch64/counter.elf build/aarch64/user/bin/counter.o build/aarch64/user/lib/lib.o build/aarch64/user/arch/aarch64/syscall.o
+Userland counter size: 105864 bytes
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/bin/shell.c -o build/aarch64/user/bin/shell.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/bin/proce.c -o build/aarch64/user/bin/proce.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -Wl,-Ttext=0x80000000 -e _start -o build/aarch64/shell.elf build/aarch64/user/bin/shell.o build/aarch64/user/lib/lib.o build/aarch64/user/bin/proce.o build/aarch64/user/arch/aarch64/syscall.o
+Userland shell size: 120368 bytes
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/bin/demo3d.c -o build/aarch64/user/bin/demo3d.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -Wl,-Ttext=0x80000000 -e _start -o build/aarch64/demo3d.elf build/aarch64/user/bin/demo3d.o build/aarch64/user/lib/lib.o build/aarch64/user/arch/aarch64/syscall.o
+Userland demo3d size: 112168 bytes
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/bin/ipc_send.c -o build/aarch64/user/bin/ipc_send.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -Wl,-Ttext=0x80000000 -e _start -o build/aarch64/ipc_send.elf build/aarch64/user/bin/ipc_send.o build/aarch64/user/lib/lib.o build/aarch64/user/arch/aarch64/syscall.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/bin/ipc_recv.c -o build/aarch64/user/bin/ipc_recv.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -Wl,-Ttext=0x80000000 -e _start -o build/aarch64/ipc_recv.elf build/aarch64/user/bin/ipc_recv.o build/aarch64/user/lib/lib.o build/aarch64/user/arch/aarch64/syscall.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/bin/notification_server.c -o build/aarch64/user/bin/notification_server.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -Wl,-Ttext=0x80000000 -e _start -o build/aarch64/notify_srv.elf build/aarch64/user/bin/notification_server.o build/aarch64/user/lib/lib.o build/aarch64/user/arch/aarch64/syscall.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/bin/crash.c -o build/aarch64/user/bin/crash.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -Wl,-Ttext=0x80000000 -e _start -o build/aarch64/crash.elf build/aarch64/user/bin/crash.o build/aarch64/user/lib/lib.o build/aarch64/user/arch/aarch64/syscall.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/bin/regedit.c -o build/aarch64/user/bin/regedit.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -Wl,-Ttext=0x80000000 -e _start -o build/aarch64/regedit.elf build/aarch64/user/bin/regedit.o build/aarch64/user/lib/lib.o build/aarch64/user/arch/aarch64/syscall.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -c user/bin/writetest.c -o build/aarch64/user/bin/writetest.o
+aarch64-none-elf-gcc -DARCH_AARCH64 -mcpu=cortex-a57 -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings -Wmissing-prototypes -Wstrict-prototypes -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -fstack-protector-strong -fno-pic -fno-pie -fno-omit-frame-pointer -O2 -g -Ikernel/include -Ikernel/arch/aarch64/include -Iinclude/api -Wl,-Ttext=0x80000000 -e _start -o build/aarch64/writetest.elf build/aarch64/user/bin/writetest.o build/aarch64/user/lib/lib.o build/aarch64/user/arch/aarch64/syscall.o
+Preparing RootFS directory...
+Assembling final disk image (GPT + Ext4)...
+Ext4: Added build/aarch64/rootfs/bin/ipc_send (Ino 13, 106576 bytes, 27 blocks)
+Ext4: Added build/aarch64/rootfs/bin/init (Ino 14, 106352 bytes, 26 blocks)
+Ext4: Added build/aarch64/rootfs/bin/regedit (Ino 15, 106376 bytes, 26 blocks)
+Ext4: Added build/aarch64/rootfs/bin/shell (Ino 16, 120368 bytes, 30 blocks)
+Ext4: Added build/aarch64/rootfs/bin/ipc_recv (Ino 17, 105912 bytes, 26 blocks)
+Ext4: Added build/aarch64/rootfs/bin/crash (Ino 18, 104592 bytes, 26 blocks)
+Ext4: Added build/aarch64/rootfs/bin/demo3d (Ino 19, 112168 bytes, 28 blocks)
+Ext4: Added build/aarch64/rootfs/bin/writetest (Ino 20, 106016 bytes, 26 blocks)
+Ext4: Added build/aarch64/rootfs/bin/counter (Ino 21, 105864 bytes, 26 blocks)
+Ext4: Added build/aarch64/rootfs/bin/notify_srv (Ino 22, 106624 bytes, 27 blocks)
+Ext4: Added build/aarch64/rootfs/etc/init.cfg (Ino 23, 189 bytes, 1 blocks)
+
+Build complete!
+  Disk Image: build/aarch64/disk.img
+  Kernel:     build/aarch64/kernel.elf
+
+Run with: make run ARCH=aarch64
+
+
+========================================
+  aarch64 Microkernel Boot
+========================================
+
+Starting QEMU (aarch64)...
+qemu-system-aarch64 -M virt -cpu cortex-a57 -m 1G -smp 4 -serial mon:stdio -display default,show-cursor=on -device virtio-gpu-device -device virtio-keyboard-device -device virtio-mouse-device -drive if=none,file=build/aarch64/disk.img,id=hd0,format=raw -device virtio-blk-device,drive=hd0 -kernel build/aarch64/kernel.elf
+FDT: No address provided, scanning RAM...
+................................................................
+FDT: Scan failed, no DTB found.
+[C0] 
+[C0] ========================================
+[C0]   AArch64 Microkernel v0.1.0
+[C0]   Production-Ready Microkernel
+[C0] ========================================
+[C0] 
+[C0] 
+[KTEST] Starting Kernel Unit Tests (3 cases found)...
+[C0] [KTEST] Running: test_math_basic... [C0] PASS
+[C0] [KTEST] Running: test_string_compare... [C0] PASS
+[C0] [KTEST] Running: test_string_length... [C0] PASS
+[C0] [KTEST] Completed. Summary: 3 PASSED, 0 FAILED
+
+PLATFORM: arch_platform_early_init starting
+[C0] [WARN] AArch64: No DTB pointer found (boot_fdt_ptr is NULL)!
+[C0] [WARN] AArch64: FDT memory discovery failed! Using 1GB fallback.
+[C0] [WARN] CPU: FDT discovery failed, trying up to 4 cores fallback.
+[Init] System Initialization Starting...
+[Init] Spawning Notification Server...
+[Init] Notification Server started (PID 18)
+[Init] Spawning Shell...
+[Init] Shell started (PID 19)
+Shell: Alive
+[Init] Entering supervisor loop
+shell> 
