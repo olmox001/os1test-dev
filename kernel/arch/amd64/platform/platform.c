@@ -83,8 +83,6 @@ void arch_platform_early_init(void) {
   pr_info("AMD64 Platform Initialization (Magic: 0x%lx, Info: 0x%lx)\n", mb_magic, mb_info_ptr);
 
   pic_init();
-  pit_init_hz(HZ);
-  lapic_init();
 
   if (mb_info_ptr == 0) {
     pr_warn("Boot information missing! Attempting to continue with fallback.\n");

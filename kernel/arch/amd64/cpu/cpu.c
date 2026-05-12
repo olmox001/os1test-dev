@@ -20,28 +20,14 @@ extern void amd64_syscall_init(void);
 
 void arch_cpu_init(void) {
   uint32_t id = arch_get_cpu_id();
+  cpu_data[id].cpu_id = id;
+  pr_info("CPU: ID %u detected\n", id);
   
   if (id >= MAX_CPUS) {
     panic("CPU ID %u exceeds MAX_CPUS", id);
   }
 
-  struct cpu_info *cpu = &cpu_data[id];
-  cpu->cpu_id = id;
-  cpu->online = 1;
-  spin_lock_init(&cpu->sched_lock);
-
-  gdt_init();
-  idt_init();
-  amd64_syscall_init();
-  lapic_init();
-  
-  if (id == 0) {
-      nr_cpus = 1;
-  } else {
-      __sync_fetch_and_add(&nr_cpus, 1);
-  }
-
-  /* Enable SSE (Required for modern compilers emitting xmm instructions) */
+  /* Enable SSE EARLY (Functions like memset might use XMM registers) */
   uint64_t cr0, cr4;
   __asm__ __volatile__("mov %%cr0, %0" : "=r"(cr0));
   cr0 &= ~(1 << 2); /* Clear EM (Emulation) */
@@ -52,7 +38,29 @@ void arch_cpu_init(void) {
   cr4 |= (1 << 9);  /* OSFXSR (OS support for fxsave/fxrstor) */
   cr4 |= (1 << 10); /* OSXMMEXCPT (OS support for unmasked simd fp exceptions) */
   __asm__ __volatile__("mov %0, %%cr4" :: "r"(cr4));
+
+  struct cpu_info *cpu = &cpu_data[id];
+  cpu->online = 1;
+  spin_lock_init(&cpu->sched_lock);
+
+  pr_info("CPU: Initializing GDT...\n");
+  gdt_init();
   
+  pr_info("CPU: Initializing IDT...\n");
+  idt_init();
+  
+  pr_info("CPU: Initializing Syscall...\n");
+  amd64_syscall_init();
+  
+  pr_info("CPU: Initializing LAPIC...\n");
+  lapic_init();
+  
+  if (id == 0) {
+      nr_cpus = 1;
+  } else {
+      __sync_fetch_and_add(&nr_cpus, 1);
+  }
+
   /* Set up GS base for per-CPU data access */
   uint64_t cpu_info_ptr = (uint64_t)cpu;
   wrmsr(0xC0000101, cpu_info_ptr); /* IA32_GS_BASE */

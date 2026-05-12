@@ -7,6 +7,7 @@
 #include <kernel/cpu.h>
 #include <arch/arch.h>
 #include <arch/amd64_internal.h>
+#include <kernel/printk.h>
 
 /* ─── GDT Segment Selectors ─── */
 #define GDT_NULL      0x00
@@ -104,6 +105,7 @@ void gdt_init(void) {
     .base  = (uint64_t)my_gdt
   };
 
+  pr_info("GDT: Loading GDTR...\n");
   __asm__ __volatile__(
     "lgdt %0\n\t"
     "pushq $0x08\n\t"
@@ -122,7 +124,9 @@ void gdt_init(void) {
     : "rax", "memory"
   );
 
+  pr_info("GDT: Loading TSS...\n");
   __asm__ __volatile__("ltr %0" :: "r"((uint16_t)GDT_TSS));
+  pr_info("GDT: Done\n");
 }
 
 void gdt_set_rsp0(uint64_t rsp0) {

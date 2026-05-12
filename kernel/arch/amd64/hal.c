@@ -6,6 +6,8 @@
 #include <drivers/pci.h>
 #include <kernel/string.h>
 #include <kernel/printk.h>
+#include <drivers/timer.h>
+#include <arch/amd64/apic.h>
 
 static void amd64_pci_callback(int bdf, uint16_t vendor, uint16_t device_id) {
     struct hal_device dev;
@@ -68,6 +70,14 @@ void arch_irq_init(void) {
 }
 
 void arch_timer_init(void) {
-    extern void pit_init_hz(uint32_t hz);
-    pit_init_hz(100);
+    /* BSP Global Timer initialization.
+     * We perform LAPIC calibration here once using the legacy PIT. */
+    pr_info("HAL: Initializing global timer state (LAPIC calibration)\n");
+    lapic_timer_calibrate();
+}
+
+void timer_init_percpu(void) {
+    /* Initialize local APIC timer for the current CPU at configured HZ.
+     * This is called by every CPU during its local initialization. */
+    lapic_timer_setup(HZ);
 }

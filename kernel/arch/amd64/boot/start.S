@@ -152,13 +152,15 @@ _start_64:
     movw $0x3f8, %dx
     outb %al, %dx
 
-    /* Clear BSS */
+    /* Clear BSS - SKIP FOR TESTING */
+    /*
     movabsq $__bss_start, %rdi
     movabsq $__bss_end, %rcx
     subq %rdi, %rcx
     jz .bss_done
     xorq %rax, %rax
     rep stosb
+    */
 .bss_done:
 
     /* Debug: Print 'G' */
@@ -187,6 +189,10 @@ _start_64:
 
 .global secondary_cpu_entry
 secondary_cpu_entry:
+    /* Debug: Print 'S' */
+    movb $'S', %al
+    movw $0x3f8, %dx
+    outb %al, %dx
     cli
     xorl %eax, %eax
     movw %ax, %ds

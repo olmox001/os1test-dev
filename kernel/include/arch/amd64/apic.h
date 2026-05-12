@@ -57,9 +57,17 @@
 #define ICR_ALL_INCL_SELF   0x80000
 #define ICR_ALL_EXCL_SELF   0xC0000
 
+#define LAPIC_LVT_MASKED    0x10000
+#define LAPIC_LVT_PERIODIC  0x20000
+
+#define LAPIC_TIMER_DIV16   0x03
+
 void lapic_init(void);
 void lapic_eoi(void);
 uint32_t lapic_get_id(void);
 void lapic_send_ipi(uint32_t lapic_id, uint32_t flags);
+void lapic_timer_calibrate(void);
+void lapic_timer_setup(uint32_t hz);
+void lapic_timer_stop(void);
 
 #endif /* ARCH_AMD64_APIC_H */
