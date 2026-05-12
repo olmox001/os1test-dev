@@ -4,6 +4,7 @@
  */
 #include <kernel/types.h>
 #include <kernel/printk.h>
+#include <kernel/string.h>
 #include <kernel/hal.h>
 #include <drivers/pci.h>
 
@@ -127,25 +128,4 @@ uint32_t pci_get_bar_size(int bdf, int bar_index) {
     }
     
     return ~size + 1;
-}
-/* 
- * Callback to register PCI device with HAL
- */
-static void pci_register_callback(int bdf, uint16_t vendor, uint16_t device) {
-    struct hal_device dev;
-    memset(&dev, 0, sizeof(dev));
-    
-    dev.bus_type = HAL_BUS_TYPE_PCI;
-    dev.vendor_id = vendor;
-    dev.device_id = device;
-    dev.base = pci_get_bar(bdf, 0) & 0xFFFFFFF0; /* Assume BAR0 for now */
-    dev.irq = 32 + pci_get_interrupt(bdf);
-    
-    snprintf(dev.name, sizeof(dev.name), "PCI-%04x:%04x", vendor, device);
-    
-    hal_register_device(&dev);
-}
-
-void pci_scan_and_register(void) {
-    pci_enumerate(pci_register_callback);
 }

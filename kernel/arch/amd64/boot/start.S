@@ -1,30 +1,27 @@
 #include <kernel/cpu.h>
 
-.section .text.boot
-.code32
-
-/* Multiboot 1 Header */
-.align 4
-.long 0x1BADB002
-.long 0x00000003
-.long -(0x1BADB002 + 0x00000003)
-
-/* Multiboot 2 Header */
+.section .multiboot, "a"
 .align 8
 multiboot2_header:
-    .long 0xe85250d6
-    .long 0
+    .long 0xe85250d6        /* Multiboot 2 Magic */
+    .long 0                 /* Architecture: i386 */
     .long multiboot2_header_end - multiboot2_header
     .long -(0xe85250d6 + 0 + (multiboot2_header_end - multiboot2_header))
 
-    /* Tags */
+    .align 8
+    .short 3
+    .short 0
+    .long 12
+    .long _start_32
+
+    .align 8
     .short 0
     .short 0
     .long 8
 multiboot2_header_end:
 
 /* PVH Header */
-.section .note.elf.pvh
+.section .note.PVH, "a"
 .align 4
     .long 4             /* Namesz */
     .long 4             /* Descsz */
@@ -32,82 +29,106 @@ multiboot2_header_end:
     .ascii "Xen\0"      /* Name */
     .long _start_32     /* Desc (Entry point) */
 
-.section .text.boot
+.section .text.boot, "ax"
+.code32
 .global _start_32
 _start_32:
+    /* Debug: Print 'B' to serial port 0x3f8 */
+    movb $'B', %al
+    movw $0x3f8, %dx
+    outb %al, %dx
+
     cli
     cld
+
+    /* 1. Setup minimal GDT for 32-bit mode */
+    lgdt (boot_gdtr_32)
+    movw $0x10, %ax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %ss
+    movw %ax, %fs
+    movw %ax, %gs
 
     /* Save magic and info for later */
     movl %eax, %ebp
     movl %ebx, %edx
 
-    /* 1. Setup temporary stack */
+    /* 2. Setup temporary stack */
     movl $boot_stack_top, %esp
 
-    /* 2. Enable PAE */
+    /* 3. Clear Page Tables */
+    movl $boot_pml4, %edi
+    xorl %eax, %eax
+    movl $4096, %ecx /* 4 pages * 1024 dwords each */
+    rep stosl
+
+    /* 4. Enable PAE */
     movl %cr4, %eax
     orl $(1 << 5), %eax
     movl %eax, %cr4
 
-    /* 3. Setup Page Tables (Identity map first 1GB) */
-    /* PML4 -> PDPT -> PD (2MB pages) */
-    
-    /* PML4[0] = boot_pdpt */
+    /* 5. Setup Page Tables (Identity map first 1GB) */
     movl $boot_pdpt, %eax
-    orl $3, %eax /* Present | RW */
+    orl $3, %eax
     movl %eax, (boot_pml4)
+    movl $0, (boot_pml4 + 4)
 
-    /* PDPT[0] = boot_pd */
     movl $boot_pd, %eax
     orl $3, %eax
     movl %eax, (boot_pdpt)
+    movl $0, (boot_pdpt + 4)
 
-    /* PDPT[3] = boot_pd_high (For 4th GB / LAPIC) */
+    /* PDPT[3] = boot_pd_high (For 3GB-4GB) */
     movl $boot_pd_high, %eax
     orl $3, %eax
-    movl %eax, (boot_pdpt + 24) /* Entry 3 (3 * 8 bytes) */
+    movl %eax, (boot_pdpt + 24)
+    movl $0, (boot_pdpt + 28)
 
     /* PD[0..511] = 0, 2MB, 4MB, ... 1GB */
     movl $boot_pd, %edi
-    movl $0x83, %eax /* Present | RW | PageSize */
+    movl $0x83, %eax
     movl $512, %ecx
 .fill_pd:
     movl %eax, (%edi)
+    movl $0, 4(%edi)
     addl $0x200000, %eax
     addl $8, %edi
     loop .fill_pd
 
-    /* PD_HIGH (3GB-4GB) -> 512 * 2MB pages */
+    /* PD_HIGH (3GB-4GB) */
     movl $boot_pd_high, %edi
-    movl $0xC0000083, %eax /* Starting at 3GB, Present | RW | PageSize */
+    movl $0xC0000083, %eax
     movl $512, %ecx
 .fill_pd_high:
     movl %eax, (%edi)
+    movl $0, 4(%edi)
     addl $0x200000, %eax
     addl $8, %edi
     loop .fill_pd_high
 
-    /* 4. Load PML4 into CR3 */
+    /* 6. Load PML4 */
     movl $boot_pml4, %eax
     movl %eax, %cr3
 
-    /* 5. Enable Long Mode */
+    /* 7. Enable Long Mode */
     movl $0xC0000080, %ecx
     rdmsr
     orl $(1 << 8), %eax
     wrmsr
 
-    /* 6. Enable Paging */
+    /* 8. Enable Paging */
     movl %cr0, %eax
     orl $(1 << 31 | 1 << 16), %eax
     movl %eax, %cr0
 
-    /* 7. Load GDT and jump to 64-bit */
-    lgdt (boot_gdtr)
-    pushl $0x08
-    pushl $_start_64
-    lret
+    /* 9. Jump to 64-bit */
+    /* Debug: Print 'C' */
+    movb $'C', %al
+    movw $0x3f8, %dx
+    outb %al, %dx
+
+    ljmp $0x08, $_start_64
 
 .code64
 _start_64:
@@ -128,21 +149,17 @@ _start_64:
     rep stosb
 .bss_done:
 
-    /* 5. Load saved boot information into kernel variables */
     movl %ebp, %eax
     movq %rax, mb_magic(%rip)
     movl %edx, %eax
     movq %rax, mb_info_ptr(%rip)
 
-    /* Setup initial stack (CPU 0) */
     movabsq $__kernel_stack, %rsp
     addq $131072, %rsp
     movq %rsp, %rbp
 
-    /* Load final 64-bit GDT */
-    lgdt (boot_gdtr)
+    lgdt (boot_gdtr_64)
     
-    /* 6. Handover to C: RDI = info, RSI = magic */
     movq mb_info_ptr(%rip), %rdi
     movq mb_magic(%rip), %rsi
     call kernel_main
@@ -153,25 +170,14 @@ _start_64:
 
 .global secondary_cpu_entry
 secondary_cpu_entry:
-    /* Secondary CPUs enter here from trampoline in 64-bit mode.
-       Stack is already set up by trampoline. */
     cli
-    
-    /* Segment registers to NULL */
     xorl %eax, %eax
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %fs
     movw %ax, %gs
     movw %ax, %ss
-
-    /* TTBR0 for secondary core should be already set by trampoline.S
-       if it loaded kernel_pgd_phys (boot_pml4). */
-
-    /* Setup local CPU state */
     call arch_cpu_init
-    
-    /* Enter scheduler */
     call kernel_secondary_main
 
 .global arch_yield
@@ -189,10 +195,14 @@ arch_impl_idle:
 boot_gdt:
     .quad 0x0000000000000000 /* Null */
     .quad 0x00af9a000000ffff /* Kernel Code 64 */
-    .quad 0x00cf92000000ffff /* Kernel Data 64 */
+    .quad 0x00cf92000000ffff /* Kernel Data 64 (Usable in 32-bit too) */
 boot_gdt_end:
 
-boot_gdtr:
+boot_gdtr_32:
+    .word boot_gdt_end - boot_gdt - 1
+    .long boot_gdt
+
+boot_gdtr_64:
     .word boot_gdt_end - boot_gdt - 1
     .quad boot_gdt
 
@@ -223,6 +233,6 @@ boot_pd_high: .skip 4096
 .align 4096
 .global __kernel_stack
 __kernel_stack:
-    .skip 131072 * MAX_CPUS     /* 128KB * MAX_CPUS */
+    .skip 131072 * MAX_CPUS
 .global __kernel_stack_top
 __kernel_stack_top:

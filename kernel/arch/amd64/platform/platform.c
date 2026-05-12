@@ -252,13 +252,14 @@ void arch_smp_init(void) {
     pr_info("AMD64: Starting SMP initialization (Probing up to %u cores)\n", cpu_count);
 
     for (uint32_t i = 1; i < cpu_count; i++) {
-        /* Create idle task BEFORE waking the CPU */
-        smp_create_idle_task(i);
-
         void *stack = arch_get_kernel_stack(i);
         int ret = arch_cpu_wake_secondary(i, secondary_cpu_entry, stack);
         
         if (ret == 0) {
+            /* Create idle task immediately after sending INIT-SIPI.
+             * The secondary core takes some time to start. */
+            smp_create_idle_task(i);
+
             /* Wait for CPU to acknowledge boot with timeout */
             volatile uint32_t timeout = 5000000;
             while (cpu_boot_ack != i && timeout > 0) {
@@ -266,8 +267,8 @@ void arch_smp_init(void) {
                 arch_nop();
             }
             if (timeout == 0) {
-                /* If CPU failed to wake, we should ideally clean up the idle task.
-                 * But for now, we just stop probing. */
+                /* If CPU didn't respond, it probably doesn't exist or failed.
+                 * On x86 QEMU, CPUs are usually contiguous. */
                 break;
             }
             pr_info("AMD64: CPU %d online\n", i);
@@ -277,9 +278,3 @@ void arch_smp_init(void) {
     }
 }
 
-extern void pci_scan_and_register(void);
-
-void arch_bus_scan(void) {
-    pr_info("AMD64: Scanning PCI bus...\n");
-    pci_scan_and_register();
-}

@@ -78,16 +78,16 @@ void arch_smp_init(void) {
     pr_info("AArch64: Starting SMP initialization for %u potential cores\n", cpu_count);
 
     for (uint32_t i = 1; i < cpu_count; i++) {
-        /* Create idle task BEFORE waking the CPU */
-        smp_create_idle_task(i);
-
         void *stack = arch_get_kernel_stack(i);
         int ret = arch_cpu_wake_secondary(i, (void (*)(void))kernel_secondary_main, stack);
         
-        if (ret != 0) {
-            /* On PSCI, failure usually means CPU ID doesn't exist */
-            break;
-        } else {
+        if (ret == 0) {
+            /* Create idle task immediately after waking.
+             * The secondary core is spinning in assembly until we set secondary_ttbr0
+             * or similar, but here it's already jumping to C.
+             * It's safe as long as it doesn't call schedule() yet. */
+            smp_create_idle_task(i);
+
             /* Wait for CPU to acknowledge boot with timeout */
             volatile uint32_t timeout = 10000000;
             while (cpu_boot_ack != i && timeout > 0) {
@@ -96,9 +96,13 @@ void arch_smp_init(void) {
             }
             if (timeout == 0) {
                 pr_warn("AArch64: CPU %d failed to acknowledge boot (timeout)\n", i);
-                break;
+                /* We don't break here on ARM, maybe other CPUs exist */
+            } else {
+                pr_info("AArch64: CPU %d online\n", i);
             }
-            pr_info("AArch64: CPU %d online\n", i);
+        } else {
+            /* Failure usually means no more CPUs in FDT/PSCI */
+            break;
         }
     }
 }
