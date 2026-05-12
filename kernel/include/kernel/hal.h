@@ -23,12 +23,19 @@ struct hal_device {
     uint32_t irq;
     uint16_t vendor_id;
     uint16_t device_id;
-    void *priv;
+    union {
+        uint32_t pci_bdf;
+        void *priv;
+    };
 };
 
 void hal_bus_init(void);
 int hal_device_get_count(void);
 struct hal_device *hal_device_get(int index);
+
+/* Internal HAL APIs for architecture-specific code */
+void hal_register_device(struct hal_device *dev);
+void arch_bus_scan(void);
 
 /* --- Device Register Access (8, 16, 32 bit) --- */
 

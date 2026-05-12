@@ -23,6 +23,7 @@
 #include <kernel/test.h>
 #include <kernel/types.h>
 #include <kernel/vmm.h>
+#include <kernel/hal.h>
 
 /* Version */
 #define KERNEL_VERSION_MAJOR 0
@@ -187,8 +188,8 @@ static void init_memory(void) {
   /* Initialize virtual memory manager */
   vmm_init();
 
-  /* Perform hardware discovery for VirtIO devices */
-  arch_virtio_scan();
+  /* Perform hardware discovery via Unified HAL */
+  hal_bus_init();
 
   /* Initialize VirtIO Block Driver */
   virtio_blk_init();

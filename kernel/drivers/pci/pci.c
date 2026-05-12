@@ -4,7 +4,7 @@
  */
 #include <kernel/types.h>
 #include <kernel/printk.h>
-#include <arch/arch.h>
+#include <kernel/hal.h>
 #include <drivers/pci.h>
 
 #define PCI_CONFIG_ADDR 0xCF8
@@ -16,8 +16,8 @@ uint32_t pci_config_read(uint8_t bus, uint8_t device, uint8_t func, uint8_t offs
                        (uint32_t)((uint32_t)func << 8) | 
                        (offset & 0xFC) | 
                        ((uint32_t)0x80000000);
-    outl(PCI_CONFIG_ADDR, address);
-    return inl(PCI_CONFIG_DATA);
+    hal_write32(PCI_CONFIG_ADDR, address);
+    return hal_read32(PCI_CONFIG_DATA);
 }
 
 void pci_config_write(uint8_t bus, uint8_t device, uint8_t func, uint8_t offset, uint32_t value) {
@@ -26,8 +26,8 @@ void pci_config_write(uint8_t bus, uint8_t device, uint8_t func, uint8_t offset,
                        (uint32_t)((uint32_t)func << 8) | 
                        (offset & 0xFC) | 
                        ((uint32_t)0x80000000);
-    outl(PCI_CONFIG_ADDR, address);
-    outl(PCI_CONFIG_DATA, value);
+    hal_write32(PCI_CONFIG_ADDR, address);
+    hal_write32(PCI_CONFIG_DATA, value);
 }
 
 /* 

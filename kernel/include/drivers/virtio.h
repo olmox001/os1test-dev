@@ -74,6 +74,7 @@ struct virtio_device {
   uintptr_t base;
   uint32_t irq;
   uint32_t device_id;
+  bool is_legacy;
   const struct virtio_transport_ops *ops;
   void *priv;
 };

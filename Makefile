@@ -124,8 +124,8 @@ KERN_C_SOURCES = \
     $(KERNEL_DIR)/drivers/uart/16550.c \
     $(KERNEL_DIR)/drivers/timer/pic_pit.c \
     $(ARCH_DIR)/platform/platform.c \
-    $(KERNEL_DIR)/drivers/pci/pci.c \
-    $(ARCH_DIR)/virtio.c
+    $(ARCH_DIR)/hal.c \
+    $(KERNEL_DIR)/drivers/pci/pci.c
 else
 # Bootloader sources
 BOOT_SOURCES = \
@@ -142,18 +142,20 @@ KERN_C_SOURCES = \
     $(ARCH_DIR)/cpu/syscall.c \
     $(ARCH_DIR)/mm/mmu.c \
     $(ARCH_DIR)/platform.c \
-    $(ARCH_DIR)/virtio.c \
+    $(ARCH_DIR)/hal.c \
     $(KERNEL_DIR)/drivers/uart/pl011.c \
     $(KERNEL_DIR)/drivers/gic/gic.c \
     $(KERNEL_DIR)/drivers/timer/timer.c
 endif
 
 KERN_C_SOURCES += \
+    $(KERNEL_DIR)/core/hal_bus.c \
     $(KERNEL_DIR)/core/syscall_dispatch.c \
     $(KERNEL_DIR)/core/timer.c \
     $(KERNEL_DIR)/drivers/console.c \
     $(KERNEL_DIR)/drivers/irq_ctrl.c \
     $(KERNEL_DIR)/drivers/sys_timer.c \
+    $(KERNEL_DIR)/drivers/virtio/virtio_hal.c \
     $(KERNEL_DIR)/drivers/virtio/virtio_blk.c \
     $(KERNEL_DIR)/drivers/virtio/virtio_input.c \
     $(KERNEL_DIR)/drivers/gpu/virtio_gpu.c \
