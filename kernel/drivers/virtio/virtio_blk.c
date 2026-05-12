@@ -125,9 +125,9 @@ int virtio_blk_read(void *buf, uint64_t sector, uint32_t count) {
   uint16_t idx = avail->idx % virtio_blk_qsize;
   avail->ring[idx] = 0;
 
-  arch_data_barrier();
+  arch_mb();
   avail->idx++;
-  arch_data_barrier();
+  arch_mb();
 
   uint16_t old_idx = used->idx;
   volatile uint16_t *used_idx_ptr = &used->idx;
@@ -193,9 +193,9 @@ int virtio_blk_write(void *buf, uint64_t sector, uint32_t count) {
   uint16_t idx = avail->idx % virtio_blk_qsize;
   avail->ring[idx] = 0;
 
-  arch_data_barrier();
+  arch_mb();
   avail->idx++;
-  arch_data_barrier();
+  arch_mb();
 
   uint16_t old_idx = used->idx;
   virtio_notify(virtio_blk_dev, 0);

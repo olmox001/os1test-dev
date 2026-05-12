@@ -17,6 +17,10 @@
  * QEMU virt machine starts kernel at EL1 directly
  */
 _start:
+    /* Save boot info (DTB pointer) immediately */
+    adrp x1, boot_info
+    str x0, [x1, :lo12:boot_info]
+
     /* Disable interrupts */
     msr daifset, #0xf
     
@@ -37,11 +41,6 @@ _start:
  * Primary CPU initialization
  */
 primary_init:
-    /* Save boot info (DTB pointer) */
-    adrp x19, boot_info
-    add x19, x19, :lo12:boot_info
-    str x0, [x19]
-    
     adrp x0, __kernel_stack
     add x0, x0, :lo12:__kernel_stack
     add x0, x0, #131072    /* Use first 128KB slice for CPU 0 */

@@ -137,7 +137,7 @@ static void virtio_input_handler(uint32_t irq, void *data) {
 
   int needs_render = 0;
   while (dev->last_used_idx != dev->used->idx) {
-    arch_data_barrier();
+    arch_mb();
     struct vring_used_elem *e =
         &dev->used->ring[dev->last_used_idx % INPUT_QSIZE];
     uint32_t id = e->id;
@@ -171,7 +171,7 @@ static void virtio_input_handler(uint32_t irq, void *data) {
     }
 
     dev->avail->ring[dev->avail->idx % INPUT_QSIZE] = id;
-    arch_data_barrier();
+    arch_mb();
     dev->avail->idx++;
     dev->last_used_idx++;
   }

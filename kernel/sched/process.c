@@ -50,7 +50,7 @@ static void __enqueue_task(struct process *p) {
   target_cpu->prio_bitmap |= (1 << prio);
 
   /* Wake up any idling CPUs */
-  arch_sev();
+  arch_cpu_notify();
 }
 
 void enqueue_task(struct process *p) {
@@ -141,7 +141,7 @@ void wake_up(struct wait_queue_head *wq) {
 void idle_task_entry(void) {
   while (1) {
     /* Wait for interrupt */
-    arch_wfi();
+    arch_idle();
     /* When we wake up, check if we need to reschedule?
        The interrupt handler (Timer) will have called schedule() if needed.
        If we are back here, it means no other task was ready.
@@ -418,7 +418,7 @@ void start_user_process(struct process *proc) {
   /* Set page table and flush TLB */
   arch_vmm_set_pgd(pgd_phys);
   arch_tlb_flush_all();
-  arch_instr_barrier();
+  arch_isb();
 
   proc->state = PROC_RUNNING;
   proc->on_cpu = cpu_id();
@@ -646,7 +646,7 @@ found:
     if (next_pgd != 0) {
       arch_vmm_set_pgd(next_pgd);
       arch_tlb_flush_all();
-      arch_instr_barrier();
+      arch_isb();
     }
   }
 

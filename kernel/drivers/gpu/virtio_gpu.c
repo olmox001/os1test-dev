@@ -124,9 +124,9 @@ static int virtio_gpu_send(struct virtio_gpu_state *priv, void *cmd,
   uint16_t idx = avail->idx % priv->qsize;
   avail->ring[idx] = 0;
 
-  arch_data_barrier();
+  arch_mb();
   avail->idx++;
-  arch_data_barrier();
+  arch_mb();
 
   virtio_notify(priv->handle, 0);
 

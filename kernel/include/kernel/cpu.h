@@ -48,7 +48,7 @@ struct cpu_info *get_cpu_info(void);
 #define cpu_init() arch_cpu_init()
 #define local_irq_enable() arch_local_irq_enable()
 #define local_irq_disable() arch_local_irq_disable()
-#define local_irq_save() __arch_local_irq_save_val()
+#define local_irq_save() arch_local_irq_save_val()
 #define local_irq_restore(flags) arch_local_irq_restore(flags)
 struct pt_regs; /* forward decl */
 struct pt_regs *serror_handler(struct pt_regs *frame);

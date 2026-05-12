@@ -235,8 +235,8 @@ static void init_scheduler(void) {
       /* CRITICAL: Flush idle task context frame and the process struct itself to POC */
       arch_cache_clean_range(idle, sizeof(struct process));
       arch_cache_clean_range(idle->context, sizeof(struct pt_regs));
-      arch_data_barrier();
-      arch_instr_barrier();
+      arch_mb();
+      arch_isb();
 
       /* Do NOT enqueue idle tasks — they are CPU-bound fallbacks only.
        * Enqueueing them allows work-stealing to migrate them to the wrong CPU,
