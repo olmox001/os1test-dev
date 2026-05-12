@@ -28,7 +28,7 @@ struct idtr {
 } __packed;
 
 static struct idt_entry idt[IDT_ENTRIES] __aligned(16);
-static struct idtr idtr;
+/* static struct idtr idtr; - Removed, using local idtr in idt_init */
 
 /* Defined in isr_stubs.S */
 extern uint64_t isr_stub_table[];
@@ -43,24 +43,31 @@ static void idt_set_gate(uint8_t num, uint64_t base, uint16_t sel, uint8_t flags
   idt[num].zero       = 0;
 }
 
-void idt_init(void) {
-  memset(&idt, 0, sizeof(struct idt_entry) * IDT_ENTRIES);
+static int idt_initialized = 0;
 
-  /* Set up IDT gates */
-  for (int i = 0; i < IDT_ENTRIES; i++) {
-    /* 0x8E = Present(1), DPL(00), Storage(0), GateType(1110 -> 32-bit Interrupt Gate)
-     * For x86-64, GateType 1110 = 64-bit Interrupt Gate */
-    idt_set_gate(i, isr_stub_table[i], 0x08, 0x8E, 0);
+void idt_init(void) {
+  if (arch_get_cpu_id() == 0) {
+      memset(&idt, 0, sizeof(struct idt_entry) * IDT_ENTRIES);
+
+      /* Set up IDT gates */
+      for (int i = 0; i < IDT_ENTRIES; i++) {
+        idt_set_gate(i, isr_stub_table[i], 0x08, 0x8E, 0);
+      }
+
+      /* Syscall via int 0x80 */
+      idt_set_gate(0x80, isr_stub_table[0x80], 0x08, 0xEE, 0);
+      
+      idt_initialized = 1;
   }
 
-  /* Syscall via int 0x80 (Legacy fallback, though we use MSR syscall) */
-  /* 0xEE = Present, DPL=3, Interrupt Gate */
-  idt_set_gate(0x80, isr_stub_table[0x80], 0x08, 0xEE, 0);
+  /* Wait for CPU 0 to finish if needed (not strictly necessary with sequential boot) */
+  while (!idt_initialized) arch_nop();
 
-  idtr.limit = sizeof(struct idt_entry) * IDT_ENTRIES - 1;
-  idtr.base  = (uint64_t)&idt;
+  struct idtr local_idtr;
+  local_idtr.limit = sizeof(struct idt_entry) * IDT_ENTRIES - 1;
+  local_idtr.base  = (uint64_t)&idt;
 
-  __asm__ __volatile__("lidt %0" : : "m"(idtr));
+  __asm__ __volatile__("lidt %0" : : "m"(local_idtr));
 }
 
 /* Page Fault Handler */

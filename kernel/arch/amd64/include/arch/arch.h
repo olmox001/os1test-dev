@@ -59,9 +59,8 @@ static inline void arch_impl_rmb(void) { __asm__ __volatile__("lfence" ::: "memo
 static inline void arch_impl_wmb(void) { __asm__ __volatile__("sfence" ::: "memory"); }
 
 static inline uint32_t arch_impl_get_cpu_id(void) {
-  uint32_t ebx;
-  __asm__ __volatile__("cpuid" : "=b"(ebx) : "a"(1) : "ecx", "edx");
-  return (ebx >> 24) & 0xFF;
+  /* Use LAPIC ID register if possible (assumes default base 0xFEE00000) */
+  return (*(volatile uint32_t *)0xFEE00020UL) >> 24;
 }
 
 /* --- VMM / TLB --- */

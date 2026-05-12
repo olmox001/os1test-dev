@@ -7,6 +7,7 @@
 #include <kernel/sched.h>
 #include <kernel/string.h>
 #include <arch/amd64_internal.h>
+#include <arch/amd64/apic.h>
 
 #include <cpuid.h>
 
@@ -24,15 +25,15 @@ void arch_cpu_init(void) {
     panic("CPU ID %u exceeds MAX_CPUS", id);
   }
 
-  gdt_init();
-  idt_init();
-  amd64_syscall_init();
-
   struct cpu_info *cpu = &cpu_data[id];
-  memset(cpu, 0, sizeof(struct cpu_info));
   cpu->cpu_id = id;
   cpu->online = 1;
   spin_lock_init(&cpu->sched_lock);
+
+  gdt_init();
+  idt_init();
+  amd64_syscall_init();
+  lapic_init();
   
   if (id == 0) {
       nr_cpus = 1;

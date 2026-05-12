@@ -34,12 +34,13 @@ struct cpu_info {
 };
 #endif
 
-#define MAX_CPUS 16
+#define MAX_CPUS 64
 
 #ifndef __ASSEMBLER__
 /* API */
 extern struct cpu_info cpu_data[MAX_CPUS];
 struct cpu_info *get_cpu_info(void);
+void smp_create_idle_task(uint32_t cpu_id);
 
 /* These are now provided by arch.h HAL macros/functions */
 #include <kernel/arch.h>

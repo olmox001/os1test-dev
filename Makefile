@@ -111,7 +111,8 @@ KERN_ASM_SOURCES = \
     $(ARCH_DIR)/boot/start.S \
     $(ARCH_DIR)/cpu/isr_stubs.S \
     $(ARCH_DIR)/cpu/syscall.S \
-    $(ARCH_DIR)/cpu/context.S
+    $(ARCH_DIR)/cpu/context.S \
+    $(ARCH_DIR)/boot/trampoline.S
 
 KERN_C_SOURCES = \
     $(ARCH_DIR)/cpu/cpu.c \
@@ -119,6 +120,7 @@ KERN_C_SOURCES = \
     $(ARCH_DIR)/cpu/gdt.c \
     $(ARCH_DIR)/cpu/msr.c \
     $(ARCH_DIR)/cpu/syscall.c \
+    $(ARCH_DIR)/cpu/apic.c \
     $(ARCH_DIR)/mm/mmu.c \
     $(ARCH_DIR)/mm/uaccess.c \
     $(KERNEL_DIR)/drivers/uart/16550.c \

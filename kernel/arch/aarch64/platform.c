@@ -59,3 +59,46 @@ struct mem_region *arch_platform_get_mem_regions(size_t *count) {
     if (count) *count = arch_region_count;
     return arch_mem_regions;
 }
+extern volatile uint32_t cpu_boot_ack;
+extern void kernel_secondary_main(void);
+extern void smp_create_idle_task(uint32_t cpu_id);
+
+void arch_smp_init(void) {
+    /* Write TTBR0 for secondary cores via HAL */
+    uint64_t current_pgd = arch_vmm_get_pgd();
+    arch_vmm_set_secondary_pgd(current_pgd);
+
+    uint32_t cpu_count = fdt_count_cpus();
+    if (cpu_count == 0) {
+        pr_warn("AArch64: FDT CPU discovery failed, probing up to %d cores\n", MAX_CPUS);
+        cpu_count = MAX_CPUS;
+    }
+    if (cpu_count > MAX_CPUS) cpu_count = MAX_CPUS;
+
+    pr_info("AArch64: Starting SMP initialization for %u potential cores\n", cpu_count);
+
+    for (uint32_t i = 1; i < cpu_count; i++) {
+        /* Create idle task BEFORE waking the CPU */
+        smp_create_idle_task(i);
+
+        void *stack = arch_get_kernel_stack(i);
+        int ret = arch_cpu_wake_secondary(i, (void (*)(void))kernel_secondary_main, stack);
+        
+        if (ret != 0) {
+            /* On PSCI, failure usually means CPU ID doesn't exist */
+            break;
+        } else {
+            /* Wait for CPU to acknowledge boot with timeout */
+            volatile uint32_t timeout = 10000000;
+            while (cpu_boot_ack != i && timeout > 0) {
+                timeout--;
+                arch_nop();
+            }
+            if (timeout == 0) {
+                pr_warn("AArch64: CPU %d failed to acknowledge boot (timeout)\n", i);
+                break;
+            }
+            pr_info("AArch64: CPU %d online\n", i);
+        }
+    }
+}

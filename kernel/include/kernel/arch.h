@@ -14,6 +14,7 @@ struct process;
 
 /* Basic CPU operations */
 void arch_cpu_init(void);
+void arch_smp_init(void);
 int arch_cpu_wake_secondary(uint64_t cpu_id, void (*entry)(void), void *stack);
 void arch_cpu_switch_context(struct process *next);
 
