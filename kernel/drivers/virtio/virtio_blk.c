@@ -125,22 +125,22 @@ int virtio_blk_read(void *buf, uint64_t sector, uint32_t count) {
   uint16_t idx = avail->idx % virtio_blk_qsize;
   avail->ring[idx] = 0;
 
-  arch_mb();
+  hal_mb();
   avail->idx++;
-  arch_mb();
+  hal_mb();
 
   uint16_t old_idx = used->idx;
   volatile uint16_t *used_idx_ptr = &used->idx;
 
   /* Notify */
   pr_info("VirtIO-Blk: Reading LBA %ld, notify dev 0x%lx\n", sector,
-          virtio_blk_dev->base);
+          virtio_blk_dev->hal_dev.base);
   virtio_notify(virtio_blk_dev, 0);
 
   /* Poll Used Ring (Busy Wait) */
   uint64_t timeout = 1000000000; /* Increased timeout */
   while (*used_idx_ptr == old_idx && timeout > 0) {
-    arch_yield();
+    hal_cpu_yield();
     timeout--;
   }
 
@@ -195,9 +195,9 @@ int virtio_blk_write(void *buf, uint64_t sector, uint32_t count) {
   uint16_t idx = avail->idx % virtio_blk_qsize;
   avail->ring[idx] = 0;
 
-  arch_mb();
+  hal_mb();
   avail->idx++;
-  arch_mb();
+  hal_mb();
 
   uint16_t old_idx = used->idx;
   virtio_notify(virtio_blk_dev, 0);

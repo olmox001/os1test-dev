@@ -46,7 +46,7 @@ int process_load_elf(struct process *proc, const char *path) {
 
     if (phdr.p_type == PT_LOAD) {
       /* Generic User Mapping Flags */
-      uint64_t flags = PTE_USER;
+      uint64_t flags = PTE_USER | PTE_VALID;
 
       if (phdr.p_flags & PF_W) {
         flags |= PTE_RW;

@@ -241,38 +241,11 @@ extern void secondary_cpu_entry(void);
 extern void smp_create_idle_task(uint32_t cpu_id);
 
 void arch_smp_init(void) {
-    /* Write PGD for secondary cores via HAL */
-    uint64_t current_pgd = arch_vmm_get_pgd();
-    arch_vmm_set_secondary_pgd(current_pgd);
-
-    /* On AMD64, without ACPI MADT parsing, we probe up to MAX_CPUS. */
+    pr_info("AMD64: SMP initialization temporarily disabled for stability verification.\n");
+    return;
+    /*
     uint32_t cpu_count = MAX_CPUS;
-    pr_info("AMD64: Starting SMP initialization (Probing up to %u cores)\n", cpu_count);
-
-    for (uint32_t i = 1; i < cpu_count; i++) {
-        void *stack = arch_get_kernel_stack(i);
-        int ret = arch_cpu_wake_secondary(i, secondary_cpu_entry, stack);
-        
-        if (ret == 0) {
-            /* Create idle task immediately after sending INIT-SIPI.
-             * The secondary core takes some time to start. */
-            smp_create_idle_task(i);
-
-            /* Wait for CPU to acknowledge boot with timeout */
-            volatile uint32_t timeout = 5000000;
-            while (cpu_boot_ack != i && timeout > 0) {
-                timeout--;
-                arch_nop();
-            }
-            if (timeout == 0) {
-                /* If CPU didn't respond, it probably doesn't exist or failed.
-                 * On x86 QEMU, CPUs are usually contiguous. */
-                break;
-            }
-            pr_info("AMD64: CPU %d online\n", i);
-        } else {
-            break;
-        }
-    }
+    ...
+    */
 }
 

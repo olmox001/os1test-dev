@@ -19,35 +19,48 @@ endif
 # Configuration
 # ==============================================================================
 
+# Common Compiler Flags
+COMMON_FLAGS = -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings \
+               -Wmissing-prototypes -Wstrict-prototypes \
+               -ffreestanding -fno-builtin -nostdlib -nostartfiles \
+               -fno-common -fstack-protector-strong \
+               -fno-pic -fno-pie \
+               -fno-omit-frame-pointer \
+               -O2 -g
+
 ifeq ($(ARCH), amd64)
-# Cross-compiler prefix for AMD64
-CROSS_COMPILE ?= x86_64-elf-
-KERNEL_DIR = kernel
-BOOT_DIR   = boot/amd64
-ARCH_DIR   = $(KERNEL_DIR)/arch/amd64
-CFLAGS += -DARCH_AMD64 -mno-red-zone -mcmodel=large
-# Assembler flags
-ASFLAGS = -g --fatal-warnings
-# Linker flags
-LDFLAGS_BOOT = -nostdlib -static -T $(BOOT_DIR)/linker.ld
-LDFLAGS_KERN = -nostdlib -static -T $(ARCH_DIR)/kernel.ld -Map build/kernel.map
-
-# Bootloader specific C flags (must be 32-bit for Multiboot)
-CFLAGS_BOOT = $(filter-out -mcmodel=large,$(CFLAGS)) -m32
-
+    # Cross-compiler prefix for AMD64
+    CROSS_COMPILE ?= x86_64-elf-
+    KERNEL_DIR = kernel
+    BOOT_DIR   = boot/amd64
+    ARCH_DIR   = $(KERNEL_DIR)/arch/amd64
+    
+    ARCH_CFLAGS = -DARCH_AMD64 -mno-red-zone -mcmodel=large
+    ASFLAGS = -g --fatal-warnings
+    
+    LDFLAGS_BOOT = -nostdlib -static -T $(BOOT_DIR)/linker.ld
+    LDFLAGS_KERN = -nostdlib -static -T $(ARCH_DIR)/kernel.ld -Map build/kernel.map
+    
+    CFLAGS_BOOT = $(filter-out -mcmodel=large,$(COMMON_FLAGS)) $(INCLUDE) -m32
+    QEMU = qemu-system-x86_64
 else
-# Cross-compiler prefix for AArch64
-CROSS_COMPILE ?= aarch64-none-elf-
-KERNEL_DIR = kernel
-BOOT_DIR   = boot/aarch64
-ARCH_DIR   = $(KERNEL_DIR)/arch/aarch64
-CFLAGS += -DARCH_AARCH64 -mcpu=cortex-a57
-# Assembler flags
-ASFLAGS = -mcpu=cortex-a57 -g --fatal-warnings
-# Linker flags
-LDFLAGS_BOOT = -nostdlib -static -T $(BOOT_DIR)/linker.ld
-LDFLAGS_KERN = -nostdlib -static -T $(ARCH_DIR)/kernel.ld -Map build/kernel.map
+    # Cross-compiler prefix for AArch64
+    CROSS_COMPILE ?= aarch64-none-elf-
+    KERNEL_DIR = kernel
+    BOOT_DIR   = boot/aarch64
+    ARCH_DIR   = $(KERNEL_DIR)/arch/aarch64
+    
+    ARCH_CFLAGS = -DARCH_AARCH64 -mcpu=cortex-a57
+    ASFLAGS = -mcpu=cortex-a57 -g --fatal-warnings
+    
+    LDFLAGS_BOOT = -nostdlib -static -T $(BOOT_DIR)/linker.ld
+    LDFLAGS_KERN = -nostdlib -static -T $(ARCH_DIR)/kernel.ld -Map build/kernel.map
+    
+    CFLAGS_BOOT = $(COMMON_FLAGS) $(INCLUDE)
+    QEMU = qemu-system-aarch64
 endif
+
+CFLAGS = $(COMMON_FLAGS) $(ARCH_CFLAGS) $(INCLUDE)
 
 # Tools
 CC      = $(CROSS_COMPILE)gcc
@@ -75,24 +88,7 @@ USER_ELF   = $(BUILD_DIR)/init.elf
 DISK_IMG   = $(BUILD_ROOT)/disk.img
 
 
-# Compiler flags (common)
-CFLAGS += -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings \
-         -Wmissing-prototypes -Wstrict-prototypes \
-         -ffreestanding -fno-builtin -nostdlib -nostartfiles \
-         -fno-common -fstack-protector-strong \
-         -fno-pic -fno-pie \
-         -fno-omit-frame-pointer \
-         -O2 -g \
-         $(INCLUDE)
-
-CXXFLAGS = -Wall -Wextra -Werror -Wpedantic -Wshadow \
-           -ffreestanding -fno-builtin -nostdlib -nostartfiles \
-           -fno-common -fstack-protector-strong \
-           -fno-pic -fno-pie \
-           -fno-omit-frame-pointer \
-           -fno-exceptions -fno-rtti \
-           -O2 -g \
-           $(INCLUDE)
+CXXFLAGS = $(COMMON_FLAGS) $(ARCH_CFLAGS) $(INCLUDE) -fno-exceptions -fno-rtti
 
 
 # ==============================================================================

@@ -98,10 +98,8 @@ void pic_init(void) {
 
 extern struct pt_regs *kernel_timer_tick(struct pt_regs *regs);
 
-struct pt_regs *amd64_timer_interrupt(struct pt_regs *regs) {
-  pic_send_eoi(0);
-  return kernel_timer_tick(regs);
-}
+/* The interrupt handlers amd64_timer_interrupt and amd64_keyboard_interrupt 
+ * have been moved to idt.c for unified LAPIC/PIC EOI management. */
 
 void pit_init_hz(uint32_t hz) {
   /* Frequency = 1193182 / divisor */
@@ -137,10 +135,4 @@ void pic_unmask(uint8_t irq) {
     hal_write8(port, value);
 }
 
-struct pt_regs *amd64_keyboard_interrupt(struct pt_regs *regs) {
-  uint8_t scancode = hal_read8(0x60);
-  /* TODO: Send scancode to keyboard driver / generic input queue */
-  (void)scancode;
-  pic_send_eoi(1);
-  return regs;
-}
+/* Keyboard interrupt is now handled in idt.c or via generic IRQ dispatch */

@@ -6,6 +6,8 @@
 /* Architecture-specific primitives are included here.
  * They must define the arch_impl_* functions or macros. */
 #include <arch/arch.h>
+#include <kernel/hal_unified.h>
+
 
 #ifndef __ASSEMBLER__
 

@@ -152,15 +152,13 @@ _start_64:
     movw $0x3f8, %dx
     outb %al, %dx
 
-    /* Clear BSS - SKIP FOR TESTING */
-    /*
+    /* Clear BSS */
     movabsq $__bss_start, %rdi
     movabsq $__bss_end, %rcx
     subq %rdi, %rcx
     jz .bss_done
     xorq %rax, %rax
     rep stosb
-    */
 .bss_done:
 
     /* Debug: Print 'G' */
@@ -236,7 +234,7 @@ mb_info_ptr: .quad 0
 .global kernel_pgd_phys
 kernel_pgd_phys: .quad boot_pml4
 
-.section .bss
+.section .boot_bss, "aw", @nobits
 .align 4096
 boot_stack:
     .skip 4096

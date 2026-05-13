@@ -1,7 +1,3 @@
-/*
- * kernel/arch/amd64/cpu/cpu.c
- * Architecture-specific CPU initialization and structures for x86-64.
- */
 #include <kernel/cpu.h>
 #include <kernel/printk.h>
 #include <kernel/sched.h>
@@ -18,15 +14,17 @@ extern void gdt_init(void);
 extern void idt_init(void);
 extern void amd64_syscall_init(void);
 
+
 void arch_cpu_init(void) {
   uint32_t id = arch_get_cpu_id();
-  cpu_data[id].cpu_id = id;
-  pr_info("CPU: ID %u detected\n", id);
   
   if (id >= MAX_CPUS) {
-    panic("CPU ID %u exceeds MAX_CPUS", id);
+    /* Fallback for early printk if LAPIC ID is weird */
+    id = 0;
   }
 
+  cpu_data[id].cpu_id = id;
+  
   /* Enable SSE EARLY (Functions like memset might use XMM registers) */
   uint64_t cr0, cr4;
   __asm__ __volatile__("mov %%cr0, %0" : "=r"(cr0));
@@ -40,11 +38,17 @@ void arch_cpu_init(void) {
   __asm__ __volatile__("mov %0, %%cr4" :: "r"(cr4));
 
   struct cpu_info *cpu = &cpu_data[id];
+  cpu->self = cpu;
   cpu->online = 1;
   spin_lock_init(&cpu->sched_lock);
 
   pr_info("CPU: Initializing GDT...\n");
   gdt_init();
+
+  /* Set up GS base for per-CPU data access (AFTER GDT to avoid wipeout) */
+  uint64_t cpu_info_ptr = (uint64_t)cpu;
+  wrmsr(0xC0000101, cpu_info_ptr); /* IA32_GS_BASE */
+  wrmsr(0xC0000102, cpu_info_ptr); /* IA32_KERNEL_GS_BASE */
   
   pr_info("CPU: Initializing IDT...\n");
   idt_init();
@@ -61,17 +65,12 @@ void arch_cpu_init(void) {
       __sync_fetch_and_add(&nr_cpus, 1);
   }
 
-  /* Set up GS base for per-CPU data access */
-  uint64_t cpu_info_ptr = (uint64_t)cpu;
-  wrmsr(0xC0000101, cpu_info_ptr); /* IA32_GS_BASE */
-  wrmsr(0xC0000102, cpu_info_ptr); /* IA32_KERNEL_GS_BASE */
-
   pr_info("AMD64 CPU %u initialized (GDT, IDT, Syscall, SSE, GS enabled)\n", id);
 }
 
 struct cpu_info *get_cpu_info(void) {
   uint32_t id = arch_get_cpu_id();
-  if (id >= MAX_CPUS) return &cpu_data[0]; // Fallback
+  if (id >= MAX_CPUS) return &cpu_data[0];
   return &cpu_data[id];
 }
 

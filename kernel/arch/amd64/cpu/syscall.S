@@ -37,20 +37,22 @@ syscall_entry:
     /* Swap GS to kernel per-CPU data */
     swapgs
 
-    /* Store user RSP in cpu_info->user_stack_tmp (offset 16) */
-    movq %rsp, %gs:16
-    /* Load kernel RSP from cpu_info->stack_top (offset 8) */
-    movq %gs:8, %rsp
+    /* Store user RSP in cpu_info->user_stack_tmp (offset 24) */
+    movq %rsp, %gs:24
+    /* Load kernel RSP from cpu_info->stack_top (offset 16) */
+    movq %gs:16, %rsp
 
     /* Now we are on kernel stack. Construct pt_regs.
      * Match layout in pt_regs.h:
      * CPU pushes (conceptually): SS, RSP, RFLAGS, CS, RIP
      * We simulate the iret frame for compatibility with ISR dispatch
      */
-    pushq $0x18         /* User SS */
-    pushq %gs:16        /* User RSP */
+    /* Build pt_regs frame manually (to match isr_stubs.S) 
+     * Correct Order (High to Low): SS, RSP, RFLAGS, CS, RIP */
+    pushq $0x1B         /* SS */
+    pushq %gs:24        /* User RSP */
     pushq %r11          /* RFLAGS (saved in r11 by syscall) */
-    pushq $0x20         /* User CS */
+    pushq $0x23         /* CS */
     pushq %rcx          /* RIP (saved in rcx by syscall) */
 
     /* "Error Code" and "Vector" */
@@ -80,21 +82,22 @@ syscall_entry:
     movq %rax, %rsp
 
     /* Restore registers */
-    popq %r15
-    popq %r14
-    popq %r13
-    popq %r12
-    popq %r11
-    popq %r10
-    popq %r9
-    popq %r8
-    popq %rbp
-    popq %rdi
-    popq %rsi
-    popq %rdx
-    popq %rcx
-    popq %rbx
-    popq %rax
+    /* Restore GP registers (Reverse order of pushes!) */
+    popq  %rax
+    popq  %rbx
+    popq  %rcx
+    popq  %rdx
+    popq  %rsi
+    popq  %rdi
+    popq  %rbp
+    popq  %r8
+    popq  %r9
+    popq  %r10
+    popq  %r11
+    popq  %r12
+    popq  %r13
+    popq  %r14
+    popq  %r15
 
     /* Skip error code and vector */
     addq $16, %rsp

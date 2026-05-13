@@ -6,6 +6,7 @@
 #define _DRIVERS_VIRTIO_H
 
 #include <kernel/types.h>
+#include <kernel/hal_device.h>
 
 /* VirtIO MMIO Register Layout */
 #define VIRTIO_MMIO_MAGIC_VALUE 0x000
@@ -71,7 +72,7 @@ struct virtio_transport_ops {
 };
 
 struct virtio_device {
-  uintptr_t base;
+  hal_device_t hal_dev;
   uint32_t irq;
   uint32_t device_id;
   bool is_legacy;

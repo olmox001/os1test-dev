@@ -117,7 +117,6 @@ void gdt_init(void) {
     "movw %%ax, %%ds\n\t"
     "movw %%ax, %%es\n\t"
     "movw %%ax, %%fs\n\t"
-    "movw %%ax, %%gs\n\t"
     "movw %%ax, %%ss\n\t"
     :
     : "m"(gdtr)

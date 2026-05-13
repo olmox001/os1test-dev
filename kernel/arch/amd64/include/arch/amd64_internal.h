@@ -11,6 +11,7 @@ void gdt_set_rsp0(uint64_t rsp0);
 void amd64_syscall_init(void);
 struct pt_regs *amd64_syscall_handler(struct pt_regs *frame);
 void arch_vmm_init(void);
+void lapic_eoi(void);
 void pic_init(void);
 void pic_send_eoi(uint8_t irq);
 void pic_unmask(uint8_t irq);

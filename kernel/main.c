@@ -135,7 +135,7 @@ void kernel_main(uint64_t x0_arg) {
   /* Enter supervisor loop */
   pr_info("%s", "[Init] Entering supervisor loop\n");
   while (1) {
-    arch_idle();
+    hal_cpu_idle();
   }
 }
 
@@ -199,24 +199,7 @@ static void init_memory(void) {
   /* Note: Slab allocator (kmalloc) is auto-initialized on first use. */
 }
 
-void smp_create_idle_task(uint32_t cpu_id) {
-  extern void idle_task_entry(void);
-  struct process *idle =
-      process_create("idle", PROC_PRIO_IDLE, PROC_PERM_SYSTEM);
-  if (idle) {
-    idle->on_cpu = cpu_id;
-    cpu_data[cpu_id].idle_task = idle;
-
-    memset(idle->context, 0, sizeof(struct pt_regs));
-    pt_regs_init_kernel_task(idle->context, (uint64_t)idle_task_entry,
-                             idle->kernel_stack);
-
-    arch_cache_clean_range(idle, sizeof(struct process));
-    arch_cache_clean_range(idle->context, sizeof(struct pt_regs));
-    arch_mb();
-    arch_isb();
-  }
-}
+/* smp_create_idle_task moved to arch-specific code or process.c */
 
 /*
  * Initialize scheduler (placeholder)
@@ -246,7 +229,7 @@ static void init_scheduler(void) {
  * Secondary CPU entry point
  */
 void kernel_secondary_main(void) {
-  uint32_t cpu = (uint32_t)arch_get_cpu_id();
+  uint32_t cpu = (uint32_t)hal_cpu_id();
 
   /* Initialize per-CPU state */
   cpu_init();
@@ -263,6 +246,6 @@ void kernel_secondary_main(void) {
 
   /* Enter idle loop - scheduler will preempt this */
   while (1) {
-    arch_idle();
+    hal_cpu_idle();
   }
 }

@@ -1,20 +1,12 @@
-/*
- * kernel/include/kernel/hal.h
- * Hardware Abstraction Layer - Unified Device Access
- */
 #ifndef _KERNEL_HAL_H
 #define _KERNEL_HAL_H
 
 #include <kernel/types.h>
-#include <kernel/arch.h>
+#include <kernel/hal_unified.h>
+#include <kernel/hal_device.h>
+#include <kernel/hal_platform.h>
 
 /* --- Device & Bus Abstraction --- */
-
-typedef enum {
-    HAL_BUS_TYPE_PLATFORM, /* FDT / Fixed MMIO */
-    HAL_BUS_TYPE_PCI,
-    HAL_BUS_TYPE_VIRTIO_MMIO
-} hal_bus_type_t;
 
 struct hal_device {
     char name[32];
@@ -40,77 +32,32 @@ void arch_bus_scan(void);
 void arch_irq_init(void);
 void arch_timer_init(void);
 
-/* --- Device Register Access (8, 16, 32 bit) --- */
-
-/**
- * hal_read8/16/32: Read from a device register.
- * On x86, this may use Port I/O or MMIO depending on the address range.
- * On AArch64, this always uses MMIO.
- */
-static inline uint8_t hal_read8(uintptr_t addr) {
+/* Helper for automatic resource type detection */
+static inline hal_res_type_t hal_auto_type(uintptr_t addr) {
 #ifdef ARCH_AMD64
-    if (addr < 0x10000) return inb((uint16_t)addr);
+    if (addr < 0x10000) return HAL_RES_PORT;
+#else
+    (void)addr;
 #endif
-    return *(volatile uint8_t *)addr;
+    return HAL_RES_MMIO;
 }
 
-static inline uint16_t hal_read16(uintptr_t addr) {
+static inline hal_bus_type_t hal_auto_bus(uintptr_t addr) {
 #ifdef ARCH_AMD64
-    if (addr < 0x10000) return inw((uint16_t)addr);
+    if (addr < 0x10000) return HAL_BUS_TYPE_PCI;
+#else
+    (void)addr;
 #endif
-    return *(volatile uint16_t *)addr;
+    /* Default to platform if not a small port on x86 */
+    return HAL_BUS_TYPE_PLATFORM;
 }
 
-static inline uint32_t hal_read32(uintptr_t addr) {
-#ifdef ARCH_AMD64
-    if (addr < 0x10000) return inl((uint16_t)addr);
-#endif
-    return *(volatile uint32_t *)addr;
-}
-
-static inline void hal_write8(uintptr_t addr, uint8_t val) {
-#ifdef ARCH_AMD64
-    if (addr < 0x10000) {
-        outb((uint16_t)addr, val);
-        return;
-    }
-#endif
-    *(volatile uint8_t *)addr = val;
-}
-
-static inline void hal_write16(uintptr_t addr, uint16_t val) {
-#ifdef ARCH_AMD64
-    if (addr < 0x10000) {
-        outw((uint16_t)addr, val);
-        return;
-    }
-#endif
-    *(volatile uint16_t *)addr = val;
-}
-
-static inline void hal_write32(uintptr_t addr, uint32_t val) {
-#ifdef ARCH_AMD64
-    if (addr < 0x10000) {
-        outl((uint16_t)addr, val);
-        return;
-    }
-#endif
-    *(volatile uint32_t *)addr = val;
-}
-
-/* --- Interrupt Management (Aliases for arch_local_irq_*) --- */
-
-#define hal_irq_enable()           arch_local_irq_enable()
-#define hal_irq_disable()          arch_local_irq_disable()
-#define hal_irq_save(flags)        arch_local_irq_save(flags)
-#define hal_irq_restore(flags)     arch_local_irq_restore(flags)
-#define hal_irq_save_val()         arch_local_irq_save_val()
-
-/* --- CPU Control (Aliases for arch_*) --- */
-
-#define hal_cpu_halt()             arch_cpu_halt()
-#define hal_cpu_yield()            arch_yield()
-#define hal_cpu_nop()              arch_nop()
-#define hal_cpu_id()               arch_get_cpu_id()
+/* --- Legacy Compatibility Aliases (Optional) --- */
+#define hal_read8(addr)  hal_dev_read8(&(hal_device_t){hal_auto_type((uintptr_t)(addr)), hal_auto_bus((uintptr_t)(addr)), (uintptr_t)(addr), 0}, 0)
+#define hal_read16(addr) hal_dev_read16(&(hal_device_t){hal_auto_type((uintptr_t)(addr)), hal_auto_bus((uintptr_t)(addr)), (uintptr_t)(addr), 0}, 0)
+#define hal_read32(addr) hal_dev_read32(&(hal_device_t){hal_auto_type((uintptr_t)(addr)), hal_auto_bus((uintptr_t)(addr)), (uintptr_t)(addr), 0}, 0)
+#define hal_write8(addr, v)  hal_dev_write8(&(hal_device_t){hal_auto_type((uintptr_t)(addr)), hal_auto_bus((uintptr_t)(addr)), (uintptr_t)(addr), 0}, 0, v)
+#define hal_write16(addr, v) hal_dev_write16(&(hal_device_t){hal_auto_type((uintptr_t)(addr)), hal_auto_bus((uintptr_t)(addr)), (uintptr_t)(addr), 0}, 0, v)
+#define hal_write32(addr, v) hal_dev_write32(&(hal_device_t){hal_auto_type((uintptr_t)(addr)), hal_auto_bus((uintptr_t)(addr)), (uintptr_t)(addr), 0}, 0, v)
 
 #endif /* _KERNEL_HAL_H */
