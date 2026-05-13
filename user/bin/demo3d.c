@@ -95,8 +95,13 @@ static void project(vec3_t p, int *sx, int *sy) {
   long long x_proj = ((long long)p.x * dist) / z_eff;
   long long y_proj = ((long long)p.y * dist) / z_eff;
 
-  *sx = WIN_W / 2 + (int)(x_proj >> 8);
-  *sy = WIN_H / 2 - (int)(y_proj >> 8);
+  int proj_x = (int)(x_proj >> 8);
+  int proj_y = (int)(y_proj >> 8);
+
+  /* Scala ridotta al 75% per rientrare nella finestra senza risultare troppo
+   * piccola */
+  *sx = WIN_W / 2 + (proj_x * 3) / 4;
+  *sy = WIN_H / 2 - (proj_y * 3) / 4;
 }
 
 /* * Flat-shaded software triangle rasterizer
