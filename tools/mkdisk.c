@@ -16,8 +16,8 @@
 #include <sys/stat.h>
 
 #define SECTOR_SIZE 512
-#define DISK_SIZE_MB 96
-#define DISK_SIZE_BYTES (DISK_SIZE_MB * 1024 * 1024)
+#define DISK_SIZE_MB 128
+#define DISK_SIZE_BYTES (DISK_SIZE_MB * 1024 * 1024LL)
 #define NUM_SECTORS (DISK_SIZE_BYTES / SECTOR_SIZE)
 
 /* GPT Constants */
@@ -37,7 +37,7 @@
 #define BLK_BLK_BITMAP 2
 #define BLK_INODE_BITMAP 3
 #define BLK_INODE_TABLE 4
-#define INODE_TABLE_BLOCKS 64
+#define INODE_TABLE_BLOCKS 256
 #define BLK_DATA_START (BLK_INODE_TABLE + INODE_TABLE_BLOCKS)
 
 /* Simplified GUID structure */
@@ -113,6 +113,7 @@ struct ext4_superblock {
   uint32_t s_creator_os;
   uint32_t s_rev_level;
   uint16_t s_def_resuid;
+  uint16_t s_def_resuid_pad; // Fix alignment
   uint16_t s_def_resgid;
   uint32_t s_first_ino;
   uint16_t s_inode_size;
@@ -190,7 +191,7 @@ static uint32_t next_free_block = BLK_DATA_START;
 static uint32_t current_free_inode = 11;
 static uint32_t total_blocks = 0;
 static uint32_t free_blocks_count = 0;
-static uint32_t free_inodes_count = 1014;
+static uint32_t free_inodes_count = 4096;
 
 uint32_t crc32(const void *data, size_t n_bytes) {
   uint32_t crc = 0xFFFFFFFF;
@@ -204,8 +205,8 @@ uint32_t crc32(const void *data, size_t n_bytes) {
   return ~crc;
 }
 
-void xseek(FILE *f, long offset, int whence) {
-  if (fseek(f, offset, whence) != 0) { perror("fseek"); exit(1); }
+void xseek(FILE *f, long long offset, int whence) {
+  if (fseeko(f, offset, whence) != 0) { perror("fseeko"); exit(1); }
 }
 
 void xwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
@@ -219,17 +220,19 @@ void *xmalloc(size_t size) {
 }
 
 void mark_block_used(uint32_t block) {
+  if (block >= 32768) { fprintf(stderr, "Error: Block %u out of bitmap range\n", block); exit(1); }
   int byte = block / 8;
   int bit = block % 8;
   block_bitmap[byte] |= (1 << bit);
-  free_blocks_count--;
+  if (free_blocks_count > 0) free_blocks_count--;
 }
 
 void mark_inode_used(uint32_t inode) {
+  if (inode == 0 || inode > 8192) { fprintf(stderr, "Error: Inode %u out of range\n", inode); exit(1); }
   int byte = (inode - 1) / 8;
   int bit = (inode - 1) % 8;
   inode_bitmap[byte] |= (1 << bit);
-  free_inodes_count--;
+  if (free_inodes_count > 0) free_inodes_count--;
 }
 
 void write_file_to_inode(FILE *f, uint64_t partition_offset_bytes, uint32_t inode_num, const char *src_path) {
@@ -356,14 +359,19 @@ void populate_directory(FILE *f, const char *host_path, uint32_t dir_inode, uint
   de = (struct ext4_dir_entry *)&dir_blk[off];
   de->inode = parent_inode; de->rec_len = 12; de->name_len = 2; de->file_type = 2; memcpy(de->name, "..", 2); off += 12;
 
-  struct entry { char name[256]; uint32_t inode; uint8_t type; char path[1024]; } entries[64];
+  struct entry { char name[256]; uint32_t inode; uint8_t type; char path[1024]; } *entries = xmalloc(sizeof(struct entry) * 512);
   int count = 0;
   struct dirent *ent;
-  while ((ent = readdir(dir)) && count < 64) {
+  while ((ent = readdir(dir)) && count < 512) {
     if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0 || ent->d_name[0] == '.') continue;
     char p[1024]; snprintf(p, 1024, "%s/%s", host_path, ent->d_name);
     struct stat st;
     if (stat(p, &st) != 0) continue;
+
+    int nlen = strlen(ent->d_name);
+    int reclen = (8 + nlen + 3) & ~3;
+    if (off + reclen >= EXT4_BLOCK_SIZE) break; // Simple stop for now
+
     uint32_t ino = current_free_inode++;
     mark_inode_used(ino);
     strcpy(entries[count].name, ent->d_name);
@@ -373,8 +381,7 @@ void populate_directory(FILE *f, const char *host_path, uint32_t dir_inode, uint
 
     de = (struct ext4_dir_entry *)&dir_blk[off];
     de->inode = ino;
-    int nlen = strlen(ent->d_name);
-    de->rec_len = (8 + nlen + 3) & ~3;
+    de->rec_len = reclen;
     de->name_len = nlen;
     de->file_type = entries[count].type;
     memcpy(de->name, ent->d_name, nlen);
@@ -398,6 +405,7 @@ void populate_directory(FILE *f, const char *host_path, uint32_t dir_inode, uint
     if (entries[i].type == 2) populate_directory(f, entries[i].path, entries[i].inode, dir_inode, partition_offset_bytes);
     else write_file_to_inode(f, partition_offset_bytes, entries[i].inode, entries[i].path);
   }
+  free(entries);
 }
 
 void write_ext4_partition(FILE *f, uint64_t start_lba, uint64_t size_sectors, const char *root_host) {
@@ -416,9 +424,10 @@ void write_ext4_partition(FILE *f, uint64_t start_lba, uint64_t size_sectors, co
 
   xseek(f, start_off + EXT4_SUPERBLOCK_OFFSET, SEEK_SET);
   struct ext4_superblock sb = {0};
-  sb.s_inodes_count = 1024; sb.s_blocks_count_lo = total_blocks; sb.s_free_blocks_count_lo = free_blocks_count;
+  sb.s_inodes_count = 4096; sb.s_blocks_count_lo = total_blocks; sb.s_free_blocks_count_lo = free_blocks_count;
   sb.s_free_inodes_count = free_inodes_count; sb.s_log_block_size = 2; sb.s_magic = EXT4_MAGIC;
   sb.s_state = 1; sb.s_rev_level = 1; sb.s_first_ino = 11; sb.s_inode_size = EXT4_INODE_SIZE;
+  sb.s_inodes_per_group = 4096; sb.s_blocks_per_group = 32768;
   xwrite(&sb, 1, sizeof(sb), f);
 
   xseek(f, start_off + EXT4_BLOCK_SIZE, SEEK_SET);

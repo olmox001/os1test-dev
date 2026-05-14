@@ -243,8 +243,9 @@ int compositor_create_window(int x, int y, int w, int h, const char *title,
     buffer[i] = windows[slot].bg_color;
   }
 
-  /* Mark main shell (PID 2) as protected */
-  windows[slot].protected = (pid == 2) ? 1 : 0;
+  /* Protect windows of system/root processes (shell, init) from accidental close */
+  windows[slot].protected =
+      (current_process->permissions & (PROC_PERM_SYSTEM | PROC_PERM_ROOT)) ? 1 : 0;
   windows[slot].top_most = 0;
 
   window_count++;

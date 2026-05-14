@@ -102,12 +102,20 @@ void pci_enumerate(void (*callback)(int bdf, uint16_t vendor, uint16_t device_id
     }
 }
 
-/* Get BAR address (simplistic) */
-uint32_t pci_get_bar(int bdf, int bar_index) {
+/* Get BAR address — handles 32-bit and 64-bit (type-2) BARs */
+uintptr_t pci_get_bar(int bdf, int bar_index) {
     uint8_t bus = (bdf >> 16) & 0xFF;
     uint8_t dev = (bdf >> 8) & 0xFF;
     uint8_t func = bdf & 0xFF;
-    return pci_config_read(bus, dev, func, 0x10 + (bar_index * 4));
+    uint8_t offset = 0x10 + (bar_index * 4);
+
+    uint32_t lo = pci_config_read(bus, dev, func, offset);
+    /* BAR bits[2:1] = 10 → 64-bit BAR; upper 32 bits are in next register */
+    if (!(lo & 1) && ((lo >> 1) & 3) == 2) {
+        uint32_t hi = pci_config_read(bus, dev, func, offset + 4);
+        return ((uintptr_t)hi << 32) | (lo & ~0xFU);
+    }
+    return (uintptr_t)(lo & ~0xFU);
 }
 
 /* Get Interrupt Line */

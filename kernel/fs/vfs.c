@@ -12,11 +12,25 @@
  * - Normalizes . and ..
  */
 void vfs_resolve_path(const char *in, char *out, size_t size) {
-    char temp[256];
+    char temp[512];
+    struct process *p = current_process;
+
+    if (!p) {
+        strncpy(out, in, size);
+        return;
+    }
+
+    /* Start with virtual root prefix */
+    strncpy(temp, p->vroot, sizeof(temp));
+
     if (in[0] == '/') {
-        strncpy(temp, in, sizeof(temp));
+        /* Absolute path relative to vroot */
+        strncat(temp, in, sizeof(temp) - strlen(temp) - 1);
     } else {
-        strncpy(temp, current_process->cwd, sizeof(temp));
+        /* Relative path from CWD (which is already relative to vroot) */
+        strncat(temp, "/", sizeof(temp) - strlen(temp) - 1);
+        strncat(temp, p->cwd, sizeof(temp) - strlen(temp) - 1);
+        
         size_t len = strlen(temp);
         if (len > 0 && temp[len-1] != '/') {
             strncat(temp, "/", sizeof(temp) - len - 1);
@@ -26,8 +40,8 @@ void vfs_resolve_path(const char *in, char *out, size_t size) {
     temp[sizeof(temp)-1] = '\0';
 
     /* Normalize path: remove redundant /./ and handle /../ */
-    char normalized[256];
-    char *parts[32];
+    char normalized[512];
+    char *parts[64];
     int part_count = 0;
     
     char *s = temp;
@@ -41,7 +55,7 @@ void vfs_resolve_path(const char *in, char *out, size_t size) {
         if (strcmp(token, "..") == 0) {
             if (part_count > 0) part_count--;
         } else if (strcmp(token, ".") != 0 && strlen(token) > 0) {
-            if (part_count < 32) parts[part_count++] = token;
+            if (part_count < 64) parts[part_count++] = token;
         }
         
         if (next) token = next + 1;

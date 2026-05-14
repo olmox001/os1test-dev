@@ -84,8 +84,21 @@ struct process {
   int on_cpu; /* CPU ID running this process, -1 if none */
 
   /* Filesystem state */
-  char cwd[128]; /* Current Working Directory */
+  char cwd[128];   /* Current Working Directory (Virtual) - Keep for now */
+  char vroot[128]; /* Virtual Root directory (Physical prefix) - Keep for now */
+  struct vnode *root_vn; /* Root vnode for this process (isolation) */
+  struct vnode *cwd_vn;  /* Current working directory vnode */
+  int type;        /* Process privilege type */
+
+  /* Auth / Identity */
+  uid_t uid;       /* User ID */
+  gid_t gid;       /* Group ID */
+  char username[32]; /* Username string */
 };
+
+/* Well-known UIDs */
+#define PROC_UID_ROOT 0
+#define PROC_UID_NEXS 1000
 
 /* Process States */
 #define PROC_UNUSED 0
@@ -101,6 +114,13 @@ struct process {
 #define PROC_PRIO_ROOT 1   /* Root shells/services */
 #define PROC_PRIO_USER 2   /* User applications */
 #define PROC_PRIO_IDLE 31  /* Idle task */
+
+/* Process Privilege Types */
+#define PROC_TYPE_MACHINE 0  /* 00: Kernel/CPU/Drivers */
+#define PROC_TYPE_ROOT    1  /* 01: System/Root */
+#define PROC_TYPE_USER    2  /* 02-97: Standard User */
+#define PROC_TYPE_GUEST   3  /* 98: Guest */
+#define PROC_TYPE_TEMP    4  /* 99: Cache/Temp */
 
 /* Process Permissions */
 #define PROC_PERM_SYSTEM (1 << 0) /* Cannot be killed, has kernel access */
@@ -121,7 +141,8 @@ struct process *__process_find_by_pid(int pid);
 int process_terminate(int pid);
 int process_wait(
     int pid); /* Wait for process, returns status or -1 if active */
-extern int process_load_elf(struct process *proc, const char *path);
+struct vnode;
+extern int process_load_elf(struct process *proc, struct vnode *vn);
 void start_user_process(struct process *proc);
 void process_init(void);
 struct pt_regs *schedule(struct pt_regs *regs);

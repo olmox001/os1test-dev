@@ -20,6 +20,9 @@ static int my_window = -1;
 static int running = 1;
 static char cmd_buf[128];
 static int cmd_len = 0;
+static char s_user[32];
+static char s_cwd[128];
+static char s_sign;
 
 /*
  * Compare strings
@@ -32,6 +35,14 @@ static int str_eq(const char *a, const char *b) {
     b++;
   }
   return *a == *b;
+}
+
+static void print_prompt(void) {
+  getcwd(s_cwd, sizeof(s_cwd));
+  printf("\033[32m%s\033[0m:\033[34m%s\033[0m%c ", s_user, s_cwd, s_sign);
+  char uart[64];
+  int len = snprintf(uart, sizeof(uart), "%s:%s%c ", s_user, s_cwd, s_sign);
+  write(3, uart, len);
 }
 
 /*
@@ -73,8 +84,9 @@ static void process_command(void) {
     print("  cd <path>  - Change directory\n");
     print("  pwd        - Show current directory\n");
     print("  cat <path> - Show file contents\n");
-    print("  kill <pid> - Kill process by PID\n");
-    print("  about      - About this OS\n");
+    print("  kill <pid>  - Kill process by PID\n");
+    print("  pkill <name>- Kill process by name\n");
+    print("  about       - About this OS\n");
     print("  exit       - Exit shell\n");
   } else if (str_eq(cmd_buf, "clear")) {
     print("\033[2J\033[H");
@@ -92,7 +104,7 @@ static void process_command(void) {
     compositor_render();
   } else if (str_eq(cmd_buf, "demo3d")) {
     print("Launching 3D demo...\n");
-    int pid = spawn("/bin/demo3d");
+    int pid = spawn("/user/bin/demo3d");
     if (pid > 0) {
       printf("Started demo3d with PID %d\n", pid);
     } else {
@@ -100,7 +112,7 @@ static void process_command(void) {
     }
   } else if (str_eq(cmd_buf, "shell")) {
     print("Opening new shell...\n");
-    int pid = spawn("/sys/bin/shell");
+    int pid = spawn("sys/bin/shell");
     if (pid > 0) {
       printf("Shell started. PID=%d\n", pid);
     } else {
@@ -108,9 +120,11 @@ static void process_command(void) {
     }
   } else if (str_eq(cmd_buf, "ps")) {
     proce_display_list(my_window);
-  } else if (str_eq(cmd_buf, "ls") || (cmd_buf[0] == 'l' && cmd_buf[1] == 's' && cmd_buf[2] == ' ')) {
+  } else if (str_eq(cmd_buf, "ls") ||
+             (cmd_buf[0] == 'l' && cmd_buf[1] == 's' && cmd_buf[2] == ' ')) {
     const char *path = ".";
-    if (cmd_buf[2] == ' ') path = &cmd_buf[3];
+    if (cmd_buf[2] == ' ')
+      path = &cmd_buf[3];
     char buf[1024];
     int len = list_dir(path, buf, sizeof(buf));
     if (len < 0) {
@@ -126,9 +140,11 @@ static void process_command(void) {
     } else {
       print("Error getting CWD\n");
     }
-  } else if (cmd_buf[0] == 'c' && cmd_buf[1] == 'd' && (cmd_buf[2] == ' ' || cmd_buf[2] == '\0')) {
+  } else if (cmd_buf[0] == 'c' && cmd_buf[1] == 'd' &&
+             (cmd_buf[2] == ' ' || cmd_buf[2] == '\0')) {
     const char *path = "/";
-    if (cmd_buf[2] == ' ') path = &cmd_buf[3];
+    if (cmd_buf[2] == ' ')
+      path = &cmd_buf[3];
     if (chdir(path) != 0) {
       printf("cd: no such directory: %s\n", path);
     }
@@ -150,6 +166,30 @@ static void process_command(void) {
     } else {
       print("Usage: kill <pid>\n");
     }
+  } else if (cmd_buf[0] == 'p' && cmd_buf[1] == 'k' && cmd_buf[2] == 'i' &&
+             cmd_buf[3] == 'l' && cmd_buf[4] == 'l' && cmd_buf[5] == ' ') {
+    const char *target = &cmd_buf[6];
+    struct ps_info procs[32];
+    int count = _sys_get_procs(procs, 32);
+    int found = 0;
+    for (int i = 0; i < count; i++) {
+      /* Match against basename of process name */
+      const char *name = procs[i].name;
+      const char *base = name;
+      for (const char *p = name; *p; p++) {
+        if (*p == '/') base = p + 1;
+      }
+      if (strncmp(base, target, 31) == 0 || strncmp(name, target, 31) == 0) {
+        printf("Killing '%s' (PID %d)...\n", procs[i].name, procs[i].pid);
+        if (kill_process(procs[i].pid) == 0)
+          print("Process terminated.\n");
+        else
+          print("Failed to kill process.\n");
+        found = 1;
+      }
+    }
+    if (!found)
+      printf("No process named '%s' found.\n", target);
   } else if (str_eq(cmd_buf, "about")) {
     print("\n\033[1;36mNeXs OS v0.0.1\033[0m\n");
     print("\033[33mGraphics:\033[0m Window Compositor + ANSI Terminal "
@@ -157,6 +197,14 @@ static void process_command(void) {
     print("\033[35mInput:\033[0m Interrupt-driven VirtIO Mouse/Keyboard\n");
     print("\033[32mLibrary:\033[0m POSIX-like userlib with printf support\n");
     print("\nSystem reported: OK\n");
+  } else if (str_eq(cmd_buf, "whoami")) {
+    char name[32];
+    get_username(name, sizeof(name));
+    printf("%s\n", name);
+  } else if (str_eq(cmd_buf, "id")) {
+    char name[32];
+    get_username(name, sizeof(name));
+    printf("uid=%d(%s) gid=%d\n", get_uid(), name, get_uid());
   } else if (str_eq(cmd_buf, "exit")) {
     print("Exiting shell...\n");
     running = 0;
@@ -183,16 +231,31 @@ static void process_command(void) {
     }
   } else {
     /* Try spawn */
-    char path[64];
-    /* Prepend / if not present */
-    if (cmd_buf[0] == '/')
-      snprintf(path, sizeof(path), "%s", cmd_buf);
-    else
-      snprintf(path, sizeof(path), "/bin/%s", cmd_buf);
+    char path[128];
+    int pid = -1;
 
-    int pid = spawn(path);
+    if (cmd_buf[0] == '/') {
+      pid = spawn(cmd_buf);
+    } else {
+      /* Try /sys/bin/ (System) */
+      snprintf(path, sizeof(path), "/sys/bin/%s", cmd_buf);
+      pid = spawn(path);
+
+      if (pid <= 0) {
+        /* Try /user/bin/ (Apps) */
+        snprintf(path, sizeof(path), "/user/bin/%s", cmd_buf);
+        pid = spawn(path);
+      }
+
+      if (pid <= 0) {
+        /* Try current directory or absolute conceptually via /bin alias */
+        snprintf(path, sizeof(path), "/bin/%s", cmd_buf);
+        pid = spawn(path);
+      }
+    }
+
     if (pid > 0) {
-      printf("Started %s (PID %d)\n", path, pid);
+      printf("Started PID %d\n", pid);
     } else {
       printf("Unknown command: %s\n", cmd_buf);
     }
@@ -226,10 +289,9 @@ int main(void) {
   print("\n[Shell] TTY Window ");
   print_hex(my_window);
   printf(" active (PID %d).\n", get_pid());
-  char cwd[128];
-  getcwd(cwd, sizeof(cwd));
-  printf("\033[32mshell\033[0m:\033[34m%s\033[0m> ", cwd);
-  write(3, "shell> ", 7); /* Mirror to UART */
+  get_username(s_user, sizeof(s_user));
+  s_sign = (get_uid() == 0) ? '#' : '$';
+  print_prompt();
 
   char buf[2] = {0, 0};
   while (running) {
@@ -240,11 +302,7 @@ int main(void) {
     char c = buf[0];
     if (c == '\n' || c == '\r') {
       process_command();
-      if (running) {
-        char prompt_cwd[128];
-        getcwd(prompt_cwd, sizeof(prompt_cwd));
-        printf("\033[32mshell\033[0m:\033[34m%s\033[0m> ", prompt_cwd);
-      }
+      if (running) print_prompt();
     } else if (c == '\b' || c == 127) {
       if (cmd_len > 0) {
         cmd_len--;

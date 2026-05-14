@@ -44,6 +44,11 @@
 #define SYS_LIST_DIR           254
 #define SYS_CHDIR              255
 #define SYS_GETCWD             256
+#define SYS_GET_UID            260
+#define SYS_GET_USERNAME       261
+
+/* Process priority levels (mirrors kernel/sched.h) */
+#define PROC_PRIO_IDLE 31
 
 /* --- Data Structures --- */
 
@@ -87,6 +92,8 @@ extern int  _sys_recv(int pid, struct ipc_message *msg);
 extern int  _sys_list_dir(const char *path, char *buf, size_t size);
 extern int  _sys_chdir(const char *path);
 extern int  _sys_getcwd(char *buf, size_t size);
+extern int  _sys_get_uid(void);
+extern int  _sys_get_username(char *buf, size_t size);
 
 /* Standard C-like Library Functions */
 long read(int fd, char *buf, unsigned long count);
@@ -127,6 +134,8 @@ void flush(void);
 /* Registry API */
 int registry_read(const char *key, char *buf, size_t size);
 int registry_write(const char *key, const char *value);
+int  get_uid(void);
+int  get_username(char *buf, size_t size);
 int set_font(void *data, size_t size);
 
 /* Filesystem Helpers */

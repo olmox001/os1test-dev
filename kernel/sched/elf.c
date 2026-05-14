@@ -11,16 +11,15 @@
 #include <kernel/string.h>
 #include <kernel/vmm.h>
 
-int process_load_elf(struct process *proc, const char *path) {
-  uint32_t ino;
-  if (ext4_find_inode(path, &ino) != 0) {
-    pr_err("ELF: File not found: %s\n", path);
-    return -1;
-  }
+#include <kernel/vfs/vnode.h>
+
+int process_load_elf(struct process *proc, struct vnode *vn) {
+  if (!vn) return -1;
 
   /* 1. Read ELF Header */
   Elf64_Ehdr ehdr;
-  if (ext4_read_inode(ino, 0, (uint8_t *)&ehdr, sizeof(ehdr)) != sizeof(ehdr)) {
+  off_t off = 0;
+  if (VOP_READ(vn, (uint8_t *)&ehdr, sizeof(ehdr), &off) != 0 || off != (off_t)sizeof(ehdr)) {
     pr_err("%s", "ELF: Failed to read header\n");
     return -1;
   }
@@ -37,10 +36,9 @@ int process_load_elf(struct process *proc, const char *path) {
   uint64_t max_vaddr = 0;
   for (int i = 0; i < ehdr.e_phnum; i++) {
     Elf64_Phdr phdr;
-    uint32_t ph_off = ehdr.e_phoff + (i * ehdr.e_phentsize);
+    off_t ph_off = ehdr.e_phoff + (i * ehdr.e_phentsize);
 
-    if (ext4_read_inode(ino, ph_off, (uint8_t *)&phdr, sizeof(phdr)) !=
-        sizeof(phdr)) {
+    if (VOP_READ(vn, (uint8_t *)&phdr, sizeof(phdr), &ph_off) != 0) {
       pr_err("ELF: Failed to read PHDR %d\n", i);
       return -1;
     }
@@ -111,10 +109,8 @@ int process_load_elf(struct process *proc, const char *path) {
         if (copy_start < copy_end) {
           uint64_t copy_len = copy_end - copy_start;
           uint64_t offset_in_page = copy_start - page_start;
-          uint64_t offset_in_file = phdr.p_offset + (copy_start - seg_vstart);
-
-          ext4_read_inode(ino, offset_in_file,
-                          (uint8_t *)kaddr + offset_in_page, copy_len);
+          off_t f_off = (off_t)(phdr.p_offset + (copy_start - seg_vstart));
+          VOP_READ(vn, (uint8_t *)kaddr + offset_in_page, copy_len, &f_off);
         }
 
         /* Clean DC to PoU and invalid IC for executable pages */

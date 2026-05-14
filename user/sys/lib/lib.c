@@ -73,6 +73,8 @@ int file_read(const char *path, void *buf, int size, int offset) { return _sys_f
 int list_dir(const char *path, char *buf, size_t size) { return _sys_list_dir(path, buf, size); }
 int chdir(const char *path) { return _sys_chdir(path); }
 int getcwd(char *buf, size_t size) { return _sys_getcwd(buf, size); }
+int get_uid(void) { return _sys_get_uid(); }
+int get_username(char *buf, size_t size) { return _sys_get_username(buf, size); }
 
 /* --- Formatting & Printing --- */
 int vsprintf(char *out, const char *fmt, va_list args) { return vsnprintf(out, 65536, fmt, args); }

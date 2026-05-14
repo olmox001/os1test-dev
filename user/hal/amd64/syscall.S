@@ -204,3 +204,15 @@ _sys_getcwd:
     movq $256, %rax
     syscall
     ret
+
+.global _sys_get_uid
+_sys_get_uid:
+    movq $260, %rax
+    syscall
+    ret
+
+.global _sys_get_username
+_sys_get_username:
+    movq $261, %rax
+    syscall
+    ret

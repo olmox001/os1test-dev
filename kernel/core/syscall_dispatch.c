@@ -10,9 +10,13 @@
 #include <kernel/string.h>
 #include <kernel/kmalloc.h>
 #include <kernel/vfs.h>
+#include <kernel/vfs_bsd.h>
 
-/* These syscall implementations are currently still in arch/<ARCH>/cpu/syscall.c 
- * or will be moved here gradually. For now, we declare them extern. 
+#define SYSBIN_PATH     "/sys/bin/"
+#define SYSBIN_PATH_LEN 9
+
+/* These syscall implementations are currently still in arch/<ARCH>/cpu/syscall.c
+ * or will be moved here gradually. For now, we declare them extern.
  */
 extern long sys_write(int fd, const char *buf, size_t count);
 extern struct pt_regs *sys_read(struct pt_regs *regs);
@@ -34,7 +38,7 @@ extern int sys_ipc_send(int target_pid, void *msg_ptr);
 extern int sys_ipc_recv(int src_pid, void *msg_ptr);
 extern int sys_ipc_try_recv(int src_pid, void *msg_ptr);
 
-extern int process_load_elf(struct process *proc, const char *path);
+/* extern int process_load_elf(struct process *proc, const char *path); */
 
 extern long sys_registry(int op, const char *key, char *value, size_t size);
 int sys_set_font(void *data, size_t size);
@@ -134,9 +138,22 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       break;
     }
     arch_local_irq_disable();
-    struct process *new_proc = process_create(k_path, PROC_PRIO_USER, PROC_PERM_USER);
+    
+    /* Path Resolution & Lookup via new VFS */
+    struct vnode *bin_vn = NULL;
+    int lookup_res = vfs_lookup(current_process->root_vn, k_path, &bin_vn, current_process->uid);
+    
+    if (lookup_res != 0) {
+      pr_err("Syscall: Spawn failed for %s (Lookup error %d)\n", k_path, lookup_res);
+      pt_regs_set_return(frame, -1);
+      arch_local_irq_enable();
+      break;
+    }
+
+    uint32_t new_perm = (strncmp(k_path, SYSBIN_PATH, SYSBIN_PATH_LEN) == 0) ? PROC_PERM_ROOT : PROC_PERM_USER;
+    struct process *new_proc = process_create(k_path, current_process->priority, new_perm);
     if (new_proc) {
-      if (process_load_elf(new_proc, k_path) == 0) {
+      if (process_load_elf(new_proc, bin_vn) == 0) {
         enqueue_task(new_proc);
         pt_regs_set_return(frame, new_proc->pid);
       } else {
@@ -149,8 +166,24 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     arch_local_irq_enable();
   } break;
   case 221: /* KILL */
-    pt_regs_set_return(frame, process_terminate((int)arg0));
-    break;
+  {
+    int pid = (int)arg0;
+    struct process *target = process_find_by_pid(pid);
+    if (!target) {
+        pt_regs_set_return(frame, -1);
+    } else {
+        /* Auth Alignment: Check if current process has authority to kill target */
+        if (!(current_process->permissions & (PROC_PERM_SYSTEM | PROC_PERM_ROOT)) &&
+            current_process->pid != target->pid) {
+            pt_regs_set_return(frame, -1);
+        } else if ((target->permissions & PROC_PERM_SYSTEM) && 
+                   !(current_process->permissions & PROC_PERM_SYSTEM)) {
+            pt_regs_set_return(frame, -1);
+        } else {
+            pt_regs_set_return(frame, process_terminate(pid));
+        }
+    }
+  } break;
   case 222: /* GETPROCS */
     pt_regs_set_return(frame, sys_getprocs((void *)arg0, (size_t)arg1));
     break;
@@ -158,7 +191,7 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     return schedule(frame);
   case 230: /* SEND (IPC) */
     pt_regs_set_return(frame, sys_ipc_send((int)arg0, (void *)arg1));
-    if (pt_regs_arg(frame, 0) == 0) return schedule(frame); /* pt_regs_arg is read-only. I mean checking the return we just set. */
+    if (pt_regs_arg(frame, 0) == 0) return schedule(frame);
     break;
   case 231: /* RECV (IPC) */
     pt_regs_set_return(frame, sys_ipc_recv((int)arg0, (void *)arg1));
@@ -181,8 +214,13 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       pt_regs_set_return(frame, -1);
       break;
     }
-    char resolved_path[128];
-    vfs_resolve_path(k_path, resolved_path, 128);
+    
+    struct vnode *vp = NULL;
+    if (vfs_lookup(current_process->cwd_vn, k_path, &vp, current_process->uid) != 0) {
+      pt_regs_set_return(frame, -1);
+      break;
+    }
+
     size_t size = (size_t)arg2;
     uint8_t *k_buf = kmalloc(size);
     if (!k_buf) {
@@ -194,8 +232,8 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       pt_regs_set_return(frame, -1);
       break;
     }
-    uint32_t offset = (uint32_t)arg3;
-    pt_regs_set_return(frame, ext4_write_file(resolved_path, k_buf, (uint32_t)size, offset));
+    off_t offset = (off_t)arg3;
+    pt_regs_set_return(frame, VOP_WRITE(vp, k_buf, size, &offset));
     kfree(k_buf);
   } break;
   case 252: /* FILE_READ */
@@ -205,14 +243,24 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       pt_regs_set_return(frame, -1);
       break;
     }
-    char resolved_path[128];
-    vfs_resolve_path(k_path, resolved_path, 128);
+    
+    struct vnode *vp = NULL;
+    if (vfs_lookup(current_process->cwd_vn, k_path, &vp, current_process->uid) != 0) {
+      pt_regs_set_return(frame, -1);
+      break;
+    }
+
     size_t size = (size_t)arg2;
-    uint32_t offset = (uint32_t)arg3;
-    int bytes_read;
+    off_t offset = (off_t)arg3;
 
     if (size == 0) {
-      bytes_read = ext4_read_file(resolved_path, NULL, 0, offset);
+      /* Get size via getattr */
+      struct vattr va;
+      if (VOP_GETATTR(vp, &va) == 0) {
+          pt_regs_set_return(frame, (int)va.va_size);
+      } else {
+          pt_regs_set_return(frame, -1);
+      }
     } else {
       uint8_t *k_buf = kmalloc(size);
       if (!k_buf) {
@@ -220,15 +268,18 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
         break;
       }
 
-      bytes_read = ext4_read_file(resolved_path, k_buf, (uint32_t)size, offset);
-      if (bytes_read >= 0) {
+      off_t start = offset;
+      int res = VOP_READ(vp, k_buf, size, &offset);
+      size_t bytes_read = (res == 0) ? (size_t)(offset - start) : 0;
+      if (res == 0) {
         if (arch_copy_to_user((void *)arg1, k_buf, bytes_read) != 0) {
-          bytes_read = -1;
+          bytes_read = 0;
+          res = -1;
         }
       }
       kfree(k_buf);
+      pt_regs_set_return(frame, res == 0 ? (int)bytes_read : -1);
     }
-    pt_regs_set_return(frame, bytes_read);
   } break;
   case 253: /* SET_FONT */
     pt_regs_set_return(frame, sys_set_font((void *)arg0, (size_t)arg1));
@@ -240,19 +291,29 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       pt_regs_set_return(frame, -1);
       break;
     }
-    char resolved_path[128];
-    vfs_resolve_path(k_path, resolved_path, 128);
+    
+    struct vnode *vp = NULL;
+    if (vfs_lookup(current_process->cwd_vn, k_path, &vp, current_process->uid) != 0) {
+      pt_regs_set_return(frame, -1);
+      break;
+    }
+
     size_t size = (size_t)arg2;
     char *k_buf = kmalloc(size);
     if (!k_buf) {
       pt_regs_set_return(frame, -1);
       break;
     }
-    int res = ext4_list_dir(resolved_path, k_buf, (uint32_t)size);
-    if (res >= 0) {
-      if (arch_copy_to_user((void *)arg1, k_buf, res + 1) != 0) {
+    off_t offset = 0;
+    int res = VOP_READDIR(vp, k_buf, size, &offset);
+    if (res == 0) {
+      if (arch_copy_to_user((void *)arg1, k_buf, size) != 0) {
         res = -1;
+      } else {
+        res = strlen(k_buf);
       }
+    } else {
+      res = -1;
     }
     kfree(k_buf);
     pt_regs_set_return(frame, res);
@@ -264,15 +325,34 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       pt_regs_set_return(frame, -1);
       break;
     }
-    char resolved_path[128];
-    vfs_resolve_path(k_path, resolved_path, 128);
     
-    /* Verify it exists and is a directory */
-    uint32_t ino;
-    if (ext4_find_inode(resolved_path, &ino) == 0) {
-       /* For now we don't check if it's a dir, but we could.
-          Assume if it exists, it's fine for now or handle later. */
-       strncpy(current_process->cwd, resolved_path, 128);
+    struct vnode *vp = NULL;
+    if (vfs_lookup(current_process->cwd_vn, k_path, &vp, current_process->uid) == 0) {
+       if (vp->v_type != VDIR) {
+           pt_regs_set_return(frame, -1);
+           break;
+       }
+
+       struct vnode *old_cwd = current_process->cwd_vn;
+       current_process->cwd_vn = vp;
+       if (old_cwd && old_cwd != vp) vrele(old_cwd);
+
+       /* Update string CWD */
+       if (k_path[0] == '/') {
+           strncpy(current_process->cwd, k_path, 128);
+       } else {
+           /* Relative path append */
+           size_t len = strlen(current_process->cwd);
+           if (len > 0 && current_process->cwd[len-1] != '/') {
+               strncat(current_process->cwd, "/", 128 - len - 1);
+           }
+           strncat(current_process->cwd, k_path, 128 - strlen(current_process->cwd) - 1);
+       }
+       /* Normalize path (remove trailing slash if not root) */
+       size_t new_len = strlen(current_process->cwd);
+       if (new_len > 1 && current_process->cwd[new_len-1] == '/') {
+           current_process->cwd[new_len-1] = '\0';
+       }
        pt_regs_set_return(frame, 0);
     } else {
        pt_regs_set_return(frame, -1);
@@ -282,6 +362,18 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
   {
     size_t size = (size_t)arg1;
     if (arch_copy_to_user((void *)arg0, current_process->cwd, size) != 0) {
+      pt_regs_set_return(frame, -1);
+    } else {
+      pt_regs_set_return(frame, 0);
+    }
+  } break;
+  case 260: /* GET_UID */
+    pt_regs_set_return(frame, (uint64_t)current_process->uid);
+    break;
+  case 261: /* GET_USERNAME */
+  {
+    size_t size = (size_t)arg1;
+    if (arch_copy_to_user((void *)arg0, current_process->username, size) != 0) {
       pt_regs_set_return(frame, -1);
     } else {
       pt_regs_set_return(frame, 0);

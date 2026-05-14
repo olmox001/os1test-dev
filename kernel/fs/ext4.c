@@ -1,6 +1,6 @@
 /*
  * kernel/fs/ext4.c
- * Simplified Read-Only Ext4 Driver (With Random Access)
+ * Read-Only Ext4 Driver (With Random Access)
  */
 #include <drivers/virtio_blk.h>
 #include <kernel/buffer.h>
@@ -9,6 +9,14 @@
 #include <kernel/kmalloc.h>
 #include <kernel/printk.h>
 #include <kernel/string.h>
+#include <kernel/vfs/vnode.h>
+#include <kernel/vfs/mount.h>
+#include <kernel/vfs/namei.h>
+
+/* Prototypes to satisfy -Wmissing-prototypes */
+int ext4_write_inode(uint32_t ino, uint32_t offset, const uint8_t *buf, uint32_t size);
+int ext4_list_dir_inode(uint32_t ino, char *buf, uint32_t size);
+void ext4_vfs_init(void);
 
 /* Global State */
 static uint64_t part_start_lba;
@@ -444,13 +452,7 @@ int ext4_read_file(const char *path, uint8_t *buf, uint32_t size,
 /*
  * Public API: Write Data to File (Overwrite/Append)
  */
-int ext4_write_file(const char *path, const uint8_t *buf, uint32_t size,
-                    uint32_t offset) {
-  uint32_t ino;
-  if (ext4_find_inode(path, &ino) != 0) {
-    pr_err("Ext4: File not found: %s\n", path);
-    return -1;
-  }
+int ext4_write_inode(uint32_t ino, uint32_t offset, const uint8_t *buf, uint32_t size) {
 
   struct ext4_inode inode;
   if (get_inode_struct(ino, &inode) != 0)
@@ -547,56 +549,229 @@ int ext4_write_file(const char *path, const uint8_t *buf, uint32_t size,
  * Public API: List directory contents
  * Formats as a space-separated string of names
  */
-int ext4_list_dir(const char *path, char *buf, uint32_t size) {
-  uint32_t dir_ino;
-  if (ext4_find_inode(path, &dir_ino) != 0)
-    return -1;
-
+int ext4_list_dir_inode(uint32_t ino, char *buf, uint32_t size) {
   struct ext4_inode inode;
-  if (get_inode_struct(dir_ino, &inode) != 0)
+  if (get_inode_struct(ino, &inode) != 0)
     return -1;
 
   if (!((inode.i_mode >> 12) == 4)) { /* Check if directory */
-    return -2;
+    return -1;
   }
 
   uint32_t dir_size = inode.i_size_lo;
   uint32_t current_blk_off = 0;
+  uint32_t buf_pos = 0;
   uint8_t *dir_buf = kmalloc(4096);
   if (!dir_buf)
     return -1;
 
-  uint32_t buf_pos = 0;
-  if (size > 0) buf[0] = '\0';
-
   while (current_blk_off < dir_size) {
-    if (ext4_read_inode(dir_ino, current_blk_off, dir_buf, 4096) <= 0) {
+    if (ext4_read_inode(ino, current_blk_off, dir_buf, 4096) <= 0) {
       break;
     }
 
     struct ext4_dir_entry *de = (struct ext4_dir_entry *)dir_buf;
     uint32_t offset = 0;
     while (offset < 4096) {
-      if (de->inode == 0 || de->rec_len < 8)
+      if (de->inode == 0)
+        break;
+      if (de->rec_len < 8 || de->rec_len > (4096 - offset))
         break;
 
       if (de->name_len > 0) {
-        /* Copy name + space */
         if (buf_pos + de->name_len + 1 < size) {
           memcpy(buf + buf_pos, de->name, de->name_len);
           buf_pos += de->name_len;
           buf[buf_pos++] = ' ';
-          buf[buf_pos] = '\0';
         }
       }
-      
       offset += de->rec_len;
-      if (offset >= 4096) break;
       de = (struct ext4_dir_entry *)((uint8_t *)de + de->rec_len);
     }
     current_blk_off += 4096;
   }
+  if (buf_pos > 0)
+    buf[buf_pos - 1] = '\0';
+  else
+    buf[0] = '\0';
 
   kfree(dir_buf);
   return (int)buf_pos;
+}
+
+/*
+ * VFS Glue: Ext4 Vnode Operations
+ */
+
+struct ext4_vnode_data {
+    uint32_t ino;
+};
+
+static struct mount ext4_static_mount;
+
+static int ext4_vop_lookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp) {
+    struct ext4_vnode_data *ddata = dvp->v_data;
+    uint32_t ino;
+
+    if (ext4_lookup_in_dir(ddata->ino, cnp->cn_nameptr, cnp->cn_namelen, &ino) != 0)
+        return -ENOENT;
+
+    /* Check vnode hash before allocating a new vnode */
+    if (vfs_hash_get(dvp->v_mount, (uint64_t)ino, vpp) == 0)
+        return 0;
+
+    struct ext4_inode inode_struct;
+    if (get_inode_struct(ino, &inode_struct) != 0) return -EIO;
+
+    vtype_t type = VREG;
+    if ((inode_struct.i_mode & 0xF000) == 0x4000) type = VDIR;
+
+    struct ext4_vnode_data *vdata = kmalloc(sizeof(struct ext4_vnode_data));
+    if (!vdata) return -ENOMEM;
+    vdata->ino = ino;
+
+    int error = getnewvnode(type, dvp->v_mount, dvp->v_op, vpp);
+    if (error) {
+        kfree(vdata);
+        return error;
+    }
+    (*vpp)->v_data = vdata;
+    vfs_hash_insert(*vpp, (uint64_t)ino);
+    return 0;
+}
+
+static int ext4_vop_reclaim(struct vnode *vp) {
+    vfs_hash_remove(vp);
+    if (vp->v_data) {
+        kfree(vp->v_data);
+        vp->v_data = NULL;
+    }
+    return 0;
+}
+
+static int ext4_vop_write(struct vnode *vp, const void *buf, size_t len, off_t *off) {
+    struct ext4_vnode_data *vdata = vp->v_data;
+    int err = ext4_write_inode(vdata->ino, (uint32_t)*off, buf, (uint32_t)len);
+    if (err >= 0) {
+        *off += err;
+        return 0;
+    }
+    return err;
+}
+
+static int ext4_vop_read(struct vnode *vp, void *buf, size_t len, off_t *off) {
+    struct ext4_vnode_data *vdata = vp->v_data;
+    int err = ext4_read_inode(vdata->ino, (uint32_t)*off, buf, (uint32_t)len);
+    if (err >= 0) {
+        *off += err;
+        return 0;
+    }
+    return err;
+}
+
+static int ext4_vop_getattr(struct vnode *vp, struct vattr *vap) {
+    struct ext4_vnode_data *vdata = vp->v_data;
+    struct ext4_inode inode_struct;
+    if (get_inode_struct(vdata->ino, &inode_struct) != 0) return -EIO;
+    
+    vap->va_size = inode_struct.i_size_lo;
+    vap->va_uid = inode_struct.i_uid;
+    vap->va_gid = inode_struct.i_gid;
+    vap->va_mode = inode_struct.i_mode;
+    vap->va_type = (inode_struct.i_mode & 0xF000) == 0x4000 ? VDIR : VREG;
+    vap->va_fileid = vdata->ino;
+    return 0;
+}
+
+static int ext4_vop_access(struct vnode *vp, mode_t mode, uid_t uid) {
+    struct ext4_vnode_data *vdata = vp->v_data;
+    struct ext4_inode inode;
+    if (get_inode_struct(vdata->ino, &inode) != 0) return -EIO;
+
+    if (uid == 0) return 0;
+
+    mode_t fmode = inode.i_mode;
+    if (uid == inode.i_uid) {
+        if ((mode & 04) && !(fmode & 0400)) return -EACCES;
+        if ((mode & 02) && !(fmode & 0200)) return -EACCES;
+        if ((mode & 01) && !(fmode & 0100)) return -EACCES;
+    } else {
+        if ((mode & 04) && !(fmode & 0004)) return -EACCES;
+        if ((mode & 02) && !(fmode & 0002)) return -EACCES;
+        if ((mode & 01) && !(fmode & 0001)) return -EACCES;
+    }
+
+    return 0;
+}
+
+static int ext4_vop_readdir(struct vnode *vp, void *buf, size_t len, off_t *off) {
+    (void)off;
+    struct ext4_vnode_data *vdata = vp->v_data;
+    int res = ext4_list_dir_inode(vdata->ino, buf, (uint32_t)len);
+    if (res >= 0) return 0;
+    return res;
+}
+
+static struct vnode_ops ext4_vnode_ops = {
+    .vop_lookup  = ext4_vop_lookup,
+    .vop_read    = ext4_vop_read,
+    .vop_write   = ext4_vop_write,
+    .vop_getattr = ext4_vop_getattr,
+    .vop_readdir = ext4_vop_readdir,
+    .vop_access  = ext4_vop_access,
+    .vop_reclaim = ext4_vop_reclaim,
+};
+
+/*
+ * VFS Operations (VFSops)
+ */
+static int ext4_vfs_mount(struct mount *mp) {
+    (void)mp;
+    return 0;
+}
+
+static int ext4_vfs_root(struct mount *mp, struct vnode **vpp) {
+    /* Check hash for ino 2 (root) before allocating */
+    if (vfs_hash_get(mp, 2, vpp) == 0)
+        return 0;
+
+    struct ext4_vnode_data *vdata = kmalloc(sizeof(struct ext4_vnode_data));
+    if (!vdata) return -ENOMEM;
+    vdata->ino = 2; /* EXT4_ROOT_INO */
+
+    int error = getnewvnode(VDIR, mp, &ext4_vnode_ops, vpp);
+    if (error) {
+        kfree(vdata);
+        return error;
+    }
+    (*vpp)->v_data = vdata;
+    (*vpp)->v_flags |= VROOT;
+    vfs_hash_insert(*vpp, 2);
+    return 0;
+}
+
+static struct vfsops ext4_vfsops = {
+    .vfs_mount = ext4_vfs_mount,
+    .vfs_root  = ext4_vfs_root,
+};
+
+/* VFS Initialization for Ext4 */
+void ext4_vfs_init(void) {
+    ext4_init();
+
+    /* Initialize the static mount struct for ext4 */
+    memset(&ext4_static_mount, 0, sizeof(ext4_static_mount));
+    strncpy(ext4_static_mount.mnt_stat, "ext4", sizeof(ext4_static_mount.mnt_stat));
+    ext4_static_mount.mnt_flag = MNT_ROOTFS;
+    ext4_static_mount.mnt_op   = &ext4_vfsops;
+    spin_lock_init(&ext4_static_mount.mnt_lock);
+    INIT_LIST_HEAD(&ext4_static_mount.mnt_list);
+
+    struct vnode *root;
+    if (ext4_vfs_root(&ext4_static_mount, &root) != 0) {
+        panic("Ext4: Failed to initialize root vnode");
+    }
+
+    ext4_static_mount.mnt_rootvnode = root;
+    vfs_set_root(root);
 }

@@ -203,6 +203,8 @@ struct process *process_find_by_pid(int pid) {
   return proc;
 }
 
+#include <kernel/vfs_bsd.h>
+
 /*
  * Create a new process
  */
@@ -255,6 +257,63 @@ struct process *process_create(const char *name, uint8_t priority,
 
   /* Filesystem Init */
   strncpy(proc->cwd, "/", sizeof(proc->cwd));
+  proc->root_vn = vfs_get_root();
+  proc->cwd_vn = vfs_get_root();
+
+  /* Assign Privilege Type, VRoot and Auth based on name/path/priority/PID */
+  if (strcmp(name, "idle") == 0 || strcmp(name, "kernel") == 0) {
+      proc->type = PROC_TYPE_MACHINE;
+      strncpy(proc->vroot, "/00", sizeof(proc->vroot));
+      proc->uid = PROC_UID_ROOT;
+      proc->gid = 0;
+      strncpy(proc->username, "kernel", 32);
+  } else if (proc->pid == 98) {
+      proc->type = PROC_TYPE_GUEST;
+      strncpy(proc->vroot, "/guest", sizeof(proc->vroot));
+      proc->uid = 98;
+      proc->gid = 98;
+      strncpy(proc->username, "guest", 32);
+  } else if (proc->pid == 99) {
+      proc->type = PROC_TYPE_TEMP;
+      strncpy(proc->vroot, "/cache", sizeof(proc->vroot));
+      proc->uid = 99;
+      proc->gid = 99;
+      strncpy(proc->username, "cache", 32);
+  } else if (strstr(name, "/sys/")) {
+      proc->type = PROC_TYPE_ROOT;
+      strncpy(proc->vroot, "/sys", sizeof(proc->vroot));
+      proc->uid = PROC_UID_ROOT;
+      proc->gid = 0;
+      strncpy(proc->username, "root", 32);
+  } else if (strstr(name, "/user/")) {
+      proc->type = PROC_TYPE_USER;
+      strncpy(proc->vroot, "/user", sizeof(proc->vroot));
+      proc->uid = PROC_UID_NEXS;
+      proc->gid = 1000;
+      strncpy(proc->username, "nexs", 32);
+      
+      /* User processes have /user as their root */
+      struct vnode *user_root = NULL;
+      if (vfs_lookup(vfs_get_root(), "/user", &user_root, PROC_UID_ROOT) == 0) {
+          proc->root_vn = user_root;
+          proc->cwd_vn = user_root;
+      }
+  } else {
+      /* PID 1 (Init) is special: it sees the whole physical disk to spawn others */
+      if (proc->pid == 1) {
+          proc->type = PROC_TYPE_ROOT;
+          strncpy(proc->vroot, "/", sizeof(proc->vroot));
+          proc->uid = PROC_UID_ROOT;
+          proc->gid = 0;
+          strncpy(proc->username, "root", 32);
+      } else {
+          proc->type = PROC_TYPE_USER;
+          strncpy(proc->vroot, "/user", sizeof(proc->vroot));
+          proc->uid = PROC_UID_NEXS;
+          proc->gid = 1000;
+          strncpy(proc->username, "nexs", 32);
+      }
+  }
 
   /* Add to pool */
   process_pool[slot] = proc;
@@ -388,24 +447,7 @@ int process_terminate(int pid) {
   extern void compositor_destroy_windows_by_pid(int pid);
   compositor_destroy_windows_by_pid(pid);
 
-  /* If we are terminating OURSELVES */
-  if (current_process == proc) {
-    proc->state = PROC_ZOMBIE;
-
-    /* If this is a user process without a parent or it is a system-level init,
-     * we should just mark it for cleanup. For now, we free the slot if it's
-     * not PID 1. */
-    spin_unlock_irqrestore(&sched_lock, flags);
-
-    /* We cannot free our own stack/pgd while running on it.
-     * We just return 0. The caller (sys_exit) MUST call schedule().
-     * schedule() will see we are ZOMBIE and switch away.
-     * The reaper (process_wait) will free us later.
-     */
-    return 0;
-  }
-
-  /* Free IPC message queue to prevent leak */
+  /* Free IPC message queue — must happen for all termination paths */
   {
     struct list_head *pos, *q;
     list_for_each_safe(pos, q, &proc->msg_queue) {
@@ -413,6 +455,13 @@ int process_terminate(int pid) {
       list_del(pos);
       kfree(node);
     }
+  }
+
+  /* If we are terminating OURSELVES: defer stack/pgd free to schedule() */
+  if (current_process == proc) {
+    proc->state = PROC_ZOMBIE;
+    spin_unlock_irqrestore(&sched_lock, flags);
+    return 0;
   }
 
   proc->state = PROC_DEAD;
@@ -514,10 +563,8 @@ struct pt_regs *schedule(struct pt_regs *regs) {
 
     /* 1. Handle Current Process */
     if (prev) {
-      /* Check if externally terminated while running on this CPU */
-      if (prev->state == PROC_DEAD) {
-        /* Cannot free kernel_stack here (we're standing on it).
-         * Defer the free to the NEXT schedule() call. */
+      /* Process died (externally killed or self-exited): defer stack/pgd free */
+      if (prev->state == PROC_DEAD || prev->state == PROC_ZOMBIE) {
         prev->on_cpu = -1;
         cpu_ptr->deferred_free_proc = prev;
         cpu_ptr->current_task = NULL;

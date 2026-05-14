@@ -26,7 +26,7 @@ int main(void) {
   if (pid_shell > 0) {
     printf("[Init] Shell started (PID %d)\n", pid_shell);
   } else {
-    print("[Init] Failed to spawn Shell!\n");
+    printf("[Init] Failed to spawn Shell!\n");
   }
 
   /* Test Notification IPC */
@@ -40,7 +40,7 @@ int main(void) {
     /* Check if shell died and respawn */
     if (wait(pid_shell) == pid_shell) {
       print("[Init] Shell terminated! Respawning...\n");
-      pid_shell = spawn("/sys/bin/shell");
+      pid_shell = spawn("/user/bin/shell");
     }
 
     /* Check if notification server died and respawn */

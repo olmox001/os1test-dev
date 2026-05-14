@@ -608,6 +608,7 @@ static void BuildIWADDirList(void)
 
     // Standard places where IWAD files are installed under Unix.
 
+    AddIWADDir("/data/doom");
     AddIWADDir("/usr/share/games/doom");
     AddIWADDir("/usr/local/share/games/doom");
 

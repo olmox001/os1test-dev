@@ -80,7 +80,7 @@ USER_DIR   = user
 USER_SYS_DIR = $(USER_DIR)/sys
 USER_LIB_DIR = $(USER_SYS_DIR)/lib
 USER_BIN_DIR = $(USER_SYS_DIR)/bin
-USER_ARCH_DIR = $(USER_DIR)/arch/$(ARCH)
+USER_HAL_DIR = $(USER_DIR)/hal/$(ARCH)
 INCLUDE    = -I$(KERNEL_DIR)/include -I$(ARCH_DIR)/include -Iinclude/api
 
 # Output files
@@ -160,6 +160,14 @@ KERN_C_SOURCES += \
     $(KERNEL_DIR)/fs/gpt.c \
     $(KERNEL_DIR)/fs/ext4.c \
     $(KERNEL_DIR)/fs/vfs.c \
+    $(KERNEL_DIR)/fs/vfs_bsd.c \
+    $(KERNEL_DIR)/fs/vfs/vfs_subr.c \
+    $(KERNEL_DIR)/fs/vfs/vfs_mount.c \
+    $(KERNEL_DIR)/fs/vfs/vfs_lookup.c \
+    $(KERNEL_DIR)/fs/vfs/vfs_cache.c \
+    $(KERNEL_DIR)/fs/vfs/vfs_hash.c \
+    $(KERNEL_DIR)/fs/vfs/vfs_default.c \
+    $(KERNEL_DIR)/fs/vfs/vfs_init.c \
     $(KERNEL_DIR)/mm/pmm.c \
     $(KERNEL_DIR)/mm/vmm.c \
     $(KERNEL_DIR)/mm/buffer.c \
@@ -241,7 +249,7 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/sys/lib
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/sys/bin
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/bin
-	@mkdir -p $(BUILD_DIR)/$(USER_ARCH_DIR)
+	@mkdir -p $(BUILD_DIR)/$(USER_HAL_DIR)
 
 # Bootloader
 bootloader: $(BOOTLOADER_BIN)
@@ -262,7 +270,7 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 	@$(OBJCOPY) -O binary $< $@
 
 # Userland
-USER_SYSCALL_O = $(BUILD_DIR)/$(USER_ARCH_DIR)/syscall.o
+USER_SYSCALL_O = $(BUILD_DIR)/$(USER_HAL_DIR)/syscall.o
 USER_LIB_O     = $(BUILD_DIR)/$(USER_SYS_DIR)/lib/lib.o
 USER_MALLOC_O  = $(BUILD_DIR)/$(USER_SYS_DIR)/lib/malloc.o
 
@@ -342,26 +350,30 @@ $(BUILD_DIR)/%.o: %.cpp
 rootfs: user
 	@rm -rf $(BUILD_DIR)/rootfs
 	@mkdir -p $(BUILD_DIR)/rootfs/sys/bin
-	@mkdir -p $(BUILD_DIR)/rootfs/bin
-	@mkdir -p $(BUILD_DIR)/rootfs/etc
 	@mkdir -p $(BUILD_DIR)/rootfs/sys/lib
-	@mkdir -p $(BUILD_DIR)/rootfs/lib
+	@mkdir -p $(BUILD_DIR)/rootfs/sys/etc
+	@mkdir -p $(BUILD_DIR)/rootfs/sys/data/fonts
+	@mkdir -p $(BUILD_DIR)/rootfs/user/bin
+	@mkdir -p $(BUILD_DIR)/rootfs/user/lib
+	@mkdir -p $(BUILD_DIR)/rootfs/user/data/doom
+	@mkdir -p $(BUILD_DIR)/rootfs/user/home/nexs
+	@mkdir -p $(BUILD_DIR)/rootfs/root
+	@mkdir -p $(BUILD_DIR)/rootfs/00
 	@cp $(SYS_ELFS) $(BUILD_DIR)/rootfs/sys/bin/
-	@cp $(BIN_ELFS) $(BUILD_DIR)/rootfs/bin/
-	@cp user/sys/bin/init.cfg $(BUILD_DIR)/rootfs/etc/
-	@# Copy essential WAD files to the root and /bin for engine detection
-	@-cp user/bin/doom/doom.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
-	@-cp user/bin/doom/doom1.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
-	@-cp user/bin/doom/doom2.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
-	@-cp user/bin/doom/doom.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
-	@-cp user/bin/doom/doom1.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
-	@-cp user/bin/doom/doom2.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
-	@mkdir -p $(BUILD_DIR)/rootfs/fonts
-	@-cp user/sys/bin/fontman/fonts/*.ttf $(BUILD_DIR)/rootfs/fonts/ 2>/dev/null || true
-	@-cp user/sys/bin/fontman/fonts/*.off $(BUILD_DIR)/rootfs/fonts/ 2>/dev/null || true
+	@cp $(BIN_ELFS) $(BUILD_DIR)/rootfs/user/bin/
+	@cp user/sys/lib/*.o $(BUILD_DIR)/rootfs/sys/lib/ 2>/dev/null || true
+	@cp user/sys/lib/*.o $(BUILD_DIR)/rootfs/user/lib/ 2>/dev/null || true
+	@cp user/lib/*.o $(BUILD_DIR)/rootfs/user/lib/ 2>/dev/null || true
+	@cp user/sys/bin/init.cfg $(BUILD_DIR)/rootfs/sys/etc/
+	@-cp user/bin/doom/doom.wad $(BUILD_DIR)/rootfs/user/data/doom/ 2>/dev/null || true
+	@-cp user/bin/doom/doom2.wad $(BUILD_DIR)/rootfs/user/data/doom/ 2>/dev/null || true
+	@-cp user/sys/bin/fontman/fonts/*.ttf $(BUILD_DIR)/rootfs/sys/data/fonts/ 2>/dev/null || true
+	@-cp user/sys/bin/fontman/fonts/*.off $(BUILD_DIR)/rootfs/sys/data/fonts/ 2>/dev/null || true
+	@# Limit WAD files to fit in 128MB
+	@find $(BUILD_DIR)/rootfs/user -name "*.wad" -size +128M -delete
 	@# Remove .elf extensions in rootfs
 	@for f in $(BUILD_DIR)/rootfs/sys/bin/*.elf; do mv "$$f" "$${f%.elf}"; done
-	@for f in $(BUILD_DIR)/rootfs/bin/*.elf; do mv "$$f" "$${f%.elf}"; done
+	@for f in $(BUILD_DIR)/rootfs/user/bin/*.elf; do mv "$$f" "$${f%.elf}"; done
 
 disk: $(MKDISK) kernel rootfs bootloader
 	@mkdir -p $(BUILD_DIR)

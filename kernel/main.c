@@ -190,9 +190,10 @@ static void init_memory(void) {
   buffer_init();
   pr_info("%s", "Buffer: Done.\n");
 
-  /* Initialize Ext4 */
-  ext4_init();
-  pr_info("%s", "Ext4: Done.\n");
+  /* Initialize VFS layer (cache, vnode hash, ext4) */
+  extern void vfs_init(void);
+  vfs_init();
+  pr_info("%s", "VFS: Done.\n");
 
   /* Initialize Keyboard */
   keyboard_init();
@@ -217,12 +218,19 @@ static void init_scheduler(void) {
 
   /* 1. Spawn the First-Stage Init Process (Must be PID 1) */
   pr_info("%s", "Scheduler: Spawning First-Stage Init...\n");
-  struct process *init =
-      process_create("init", PROC_PRIO_USER, PROC_PERM_SYSTEM);
-  if (init && process_load_elf(init, "/sys/bin/init") == 0) {
-    pr_info("Scheduler: Initialized PID %d (/sys/bin/init)\n", init->pid);
-    enqueue_task(init);
+  /* Spawn Init via VFS */
+  struct vnode *init_vn = NULL;
+  extern struct vnode *vfs_get_root(void);
+  extern int vfs_lookup(struct vnode *start_vp, const char *path, struct vnode **vpp, uid_t uid);
+  struct process *init = process_create("init", PROC_PRIO_ROOT, PROC_PERM_SYSTEM);
+
+  if (vfs_lookup(vfs_get_root(), "/sys/bin/init", &init_vn, 0) == 0) {
+    if (init && process_load_elf(init, init_vn) == 0) {
+      pr_info("Scheduler: Initialized PID %d (/sys/bin/init)\n", init->pid);
+      enqueue_task(init);
+    }
   } else {
+    pr_err("%s", "Main: Failed to lookup /sys/bin/init via VFS!\n");
     panic("Failed to load /init");
   }
 

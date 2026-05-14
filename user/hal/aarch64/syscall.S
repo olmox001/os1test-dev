@@ -224,7 +224,25 @@ _sys_chdir:
     ret
 
 .global _sys_getcwd
+.global _sys_get_uid
+.global _sys_get_username
+
+/* ... */
+
+.global _sys_getcwd
 _sys_getcwd:
     mov x8, #256
+    svc #0
+    ret
+
+.global _sys_get_uid
+_sys_get_uid:
+    mov x8, #260
+    svc #0
+    ret
+
+.global _sys_get_username
+_sys_get_username:
+    mov x8, #261
     svc #0
     ret
