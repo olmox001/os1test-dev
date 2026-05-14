@@ -44,6 +44,7 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap);
 int vsprintf(char *str, const char *format, va_list ap);
 int vfprintf(FILE *stream, const char *format, va_list ap);
 int sscanf(const char *str, const char *format, ...);
+int vsscanf(const char *str, const char *format, va_list ap);
 
 int puts(const char *s);
 int putchar(int c);

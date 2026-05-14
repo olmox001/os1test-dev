@@ -117,12 +117,8 @@ static void keyboard_process_key(uint16_t code, int32_t value) {
     return;
   }
 
-  /* Only process key presses, not releases */
-  if (value == 0)
-    return;
-
-  /* Check for Ctrl+C */
-  if (ctrl_pressed && code == KEY_C) {
+  /* Handle Ctrl+C */
+  if (ctrl_pressed && code == KEY_C && value != 0) {
     /* Add ETX (End of Text) to buffer */
     char c = 0x03;
     uint32_t next = (kb_head + 1) % KB_BUFFER_SIZE;
@@ -154,7 +150,7 @@ static void keyboard_process_key(uint16_t code, int32_t value) {
     c = scancode_to_ascii[code];
 
   if (c != 0) {
-    pr_info("Keyboard: Char='%c' -> PID %d\n", c, keyboard_focus_pid);
+    pr_info("Keyboard: Char='%c' (val=%d) -> PID %d\n", c, value, keyboard_focus_pid);
   }
 
   /* Send IPC message if we have a focus PID */
@@ -163,7 +159,7 @@ static void keyboard_process_key(uint16_t code, int32_t value) {
     msg.from = 0; /* Kernel/Driver */
     msg.type = IPC_TYPE_INPUT;
     msg.data1 = (uint64_t)c;
-    msg.data2 = 0;
+    msg.data2 = (uint64_t)value; /* 0=release, 1=press, 2=repeat */
     /* No payload needed for single char */
 
     kernel_ipc_send(keyboard_focus_pid, &msg);

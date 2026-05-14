@@ -9,6 +9,7 @@ void free(void *ptr);
 void *realloc(void *ptr, size_t size);
 void *calloc(size_t nmemb, size_t size);
 void exit(int status);
+long strtol(const char *nptr, char **endptr, int base);
 int stat(const char *path, struct stat *buf);
 int mkdir(const char *path, mode_t mode);
 double atof(const char *nptr);

@@ -639,6 +639,22 @@ void compositor_handle_click(int button, int state) {
     keyboard_focus_pid = hit->pid;
   }
 
+  /* Send mouse event to the focused process */
+  if (keyboard_focus_pid > 0) {
+    struct ipc_message msg;
+    msg.from = 0; /* Kernel */
+    msg.type = IPC_TYPE_MOUSE;
+    msg.data1 = (uint64_t)button;
+    msg.data2 = (uint64_t)state;
+    /* Store relative coordinates in payload */
+    int rel_x = mouse_x - hit->x;
+    int rel_y = mouse_y - hit->y;
+    memcpy(msg.payload, &rel_x, 4);
+    memcpy(msg.payload + 4, &rel_y, 4);
+
+    kernel_ipc_send(keyboard_focus_pid, &msg);
+  }
+
   /* Check for close button — save pid/id, release lock before process_terminate
    */
   if (!hit->protected) {

@@ -5,8 +5,8 @@
 
 /* Minimal math.h for Doom port */
 
-#define abs(x) ((x) < 0 ? -(x) : (x))
-#define fabs(x) ((x) < 0 ? -(x) : (x))
+int abs(int x);
+double fabs(double x);
 
 int sin_fp(int x);
 int cos_fp(int x);
