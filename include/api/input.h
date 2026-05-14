@@ -19,6 +19,8 @@ typedef struct {
         struct {
             unsigned char key;
             int state;
+            uint16_t scancode;
+            char utf8[8];
         } keyboard;
         struct {
             int button;

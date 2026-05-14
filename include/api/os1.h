@@ -38,6 +38,9 @@
 #define SYS_RECV               231
 #define SYS_WAIT               247
 #define SYS_REGISTRY           250
+#define SYS_FILE_WRITE         251
+#define SYS_FILE_READ          252
+#define SYS_SET_FONT           253
 
 /* --- Data Structures --- */
 
@@ -89,6 +92,7 @@ int  spawn(const char *path);
 int  kill_process(int pid);
 int  wait(int pid);
 void yield(void);
+int utf8_decode(const char *s, uint32_t *code);
 void sleep(int ticks);
 
 void *sbrk(intptr_t increment);
@@ -117,6 +121,7 @@ void flush(void);
 /* Registry API */
 int registry_read(const char *key, char *buf, size_t size);
 int registry_write(const char *key, const char *value);
+int set_font(void *data, size_t size);
 
 /* Filesystem Helpers */
 int file_write(const char *path, const void *buf, int size, int offset);

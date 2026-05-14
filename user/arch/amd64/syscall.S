@@ -180,3 +180,9 @@ _sys_sbrk:
     movq $216, %rax
     syscall
     ret
+
+.global _sys_set_font
+_sys_set_font:
+    movq $253, %rax
+    syscall
+    ret

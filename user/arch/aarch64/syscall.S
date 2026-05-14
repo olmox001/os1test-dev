@@ -36,6 +36,7 @@ _start:
 .global _sys_compositor_render
 .global _sys_file_write
 .global _sys_file_read
+.global _sys_set_font
 
 /* 
  * Generic Syscall Wrapper Macros could be used, but manual is clearer for now
@@ -201,5 +202,11 @@ _sys_try_recv:
 .global _sys_sbrk
 _sys_sbrk:
     mov x8, #216
+    svc #0
+    ret
+
+/* int _sys_set_font(void *data, size_t size) */
+_sys_set_font:
+    mov x8, #253
     svc #0
     ret

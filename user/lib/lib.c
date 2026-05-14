@@ -54,6 +54,7 @@ void set_focus(int pid) { extern void _sys_set_focus(int pid); _sys_set_focus(pi
 #include "../../kernel/lib/vsnprintf.c"
 #include "../../kernel/lib/math.c"
 #include "../../kernel/lib/string.c"
+#include "font_lib.c"
 
 /* --- Stack protector support --- */
 uintptr_t __stack_chk_guard = 0x595e9eda;
@@ -61,7 +62,12 @@ void __stack_chk_fail(void) { printf("Stack smashing detected!\n"); exit(1); }
 
 /* --- Registry Wrappers --- */
 int registry_read(const char *key, char *buf, size_t size) { return (int)_sys_registry(0, key, buf, size); }
-int registry_write(const char *key, const char *value) { return (int)_sys_registry(1, key, (char *)value, 0); }
+int registry_write(const char *key, const char *value) { return (int)_sys_registry(1, key, (char *)value, strlen(value)); }
+
+int set_font(void *data, size_t size) {
+  extern int _sys_set_font(void *data, size_t size);
+  return _sys_set_font(data, size);
+}
 int file_write(const char *path, const void *buf, int size, int offset) { return _sys_file_write(path, buf, size, offset); }
 int file_read(const char *path, void *buf, int size, int offset) { return _sys_file_read(path, buf, size, offset); }
 
@@ -195,8 +201,10 @@ int input_poll_event(input_event_t *event) {
 
   if (msg.type == IPC_TYPE_INPUT) {
     event->type = INPUT_TYPE_KEYBOARD;
-    event->keyboard.key = (unsigned char)msg.data1;
+    event->keyboard.key = (unsigned char)(msg.data1 & 0xFF);
+    event->keyboard.scancode = (uint16_t)(msg.data1 >> 16);
     event->keyboard.state = (int)msg.data2;
+    memcpy(event->keyboard.utf8, msg.payload, 8);
     return 1;
   } else if (msg.type == IPC_TYPE_MOUSE) {
     event->type = INPUT_TYPE_MOUSE;
@@ -375,3 +383,27 @@ int fflush(FILE *stream) { (void)stream; return 0; }
 int remove(const char *pathname) { (void)pathname; return 0; }
 int rename(const char *oldpath, const char *newpath) { (void)oldpath; (void)newpath; return 0; }
 int puts(const char *s) { write(1, s, strlen(s)); write(1, "\n", 1); return 0; }
+
+/*
+ * UTF-8 Decoding
+ */
+int utf8_decode(const char *s, uint32_t *code) {
+  if (!s || !code) return 0;
+  unsigned char c = (unsigned char)s[0];
+
+  if (c < 0x80) {
+    *code = c;
+    return 1;
+  } else if ((c & 0xE0) == 0xC0) {
+    *code = ((uint32_t)(c & 0x1F) << 6) | (uint32_t)(s[1] & 0x3F);
+    return 2;
+  } else if ((c & 0xF0) == 0xE0) {
+    *code = ((uint32_t)(c & 0x0F) << 12) | ((uint32_t)(s[1] & 0x3F) << 6) | (uint32_t)(s[2] & 0x3F);
+    return 3;
+  } else if ((c & 0xF8) == 0xF0) {
+    *code = ((uint32_t)(c & 0x07) << 18) | ((uint32_t)(s[1] & 0x3F) << 12) |
+            ((uint32_t)(s[2] & 0x3F) << 6) | (uint32_t)(s[3] & 0x3F);
+    return 4;
+  }
+  return 0;
+}

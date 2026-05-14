@@ -34,6 +34,7 @@ extern int sys_ipc_try_recv(int src_pid, void *msg_ptr);
 extern int process_load_elf(struct process *proc, const char *path);
 
 extern long sys_registry(int op, const char *key, char *value, size_t size);
+int sys_set_font(void *data, size_t size);
 extern int ext4_write_file(const char *path, const uint8_t *buf, uint32_t size, uint32_t offset);
 extern int ext4_read_file(const char *path, uint8_t *buf, uint32_t size, uint32_t offset);
 
@@ -223,6 +224,9 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     }
     pt_regs_set_return(frame, bytes_read);
   } break;
+  case 253: /* SET_FONT */
+    pt_regs_set_return(frame, sys_set_font((void *)arg0, (size_t)arg1));
+    break;
   default:
     pr_warn("Unknown syscall: %ld\n", syscall_num);
     pt_regs_set_return(frame, -1);

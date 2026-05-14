@@ -171,6 +171,7 @@ KERN_C_SOURCES += \
     $(KERNEL_DIR)/lib/registry.c \
     $(KERNEL_DIR)/lib/ktest.c \
     $(KERNEL_DIR)/lib/ktest_samples.c \
+    $(KERNEL_DIR)/lib/utf8.c \
     $(KERNEL_DIR)/cpu.c \
     $(KERNEL_DIR)/sched/process.c \
     $(KERNEL_DIR)/sched/elf.c \
@@ -237,6 +238,7 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/lib
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/bin
 	@mkdir -p $(BUILD_DIR)/$(USER_ARCH_DIR)
+	@mkdir -p $(BUILD_DIR)/$(USER_ARCH_DIR)
 
 # Bootloader
 bootloader: $(BOOTLOADER_BIN)
@@ -264,7 +266,12 @@ USER_MALLOC_O  = $(BUILD_DIR)/$(USER_DIR)/lib/malloc.o
 USER_ELFS = $(BUILD_DIR)/init.elf $(BUILD_DIR)/counter.elf $(BUILD_DIR)/shell.elf \
             $(BUILD_DIR)/demo3d.elf $(BUILD_DIR)/ipc_send.elf $(BUILD_DIR)/ipc_recv.elf \
             $(BUILD_DIR)/notify_srv.elf $(BUILD_DIR)/crash.elf $(BUILD_DIR)/regedit.elf \
-            $(BUILD_DIR)/writetest.elf $(BUILD_DIR)/doom.elf
+            $(BUILD_DIR)/writetest.elf $(BUILD_DIR)/doom.elf $(BUILD_DIR)/input_test.elf \
+            $(BUILD_DIR)/fontman.elf
+USER_TARGETS = $(USER_DIR)/bin/shell.elf $(USER_DIR)/bin/ls.elf $(USER_DIR)/bin/cat.elf \
+               $(USER_DIR)/bin/mkdir.elf $(USER_DIR)/bin/ps.elf $(USER_DIR)/bin/demo.elf \
+               $(USER_DIR)/bin/demo3d.elf $(USER_DIR)/bin/doom.elf $(USER_DIR)/bin/input_test.elf \
+               $(USER_DIR)/bin/fontman.elf
 
 user: $(USER_ELFS)
 
@@ -288,6 +295,12 @@ $(BUILD_DIR)/notify_srv.elf: $(BUILD_DIR)/$(USER_DIR)/bin/notification_server.o 
 $(BUILD_DIR)/crash.elf: $(BUILD_DIR)/$(USER_DIR)/bin/crash.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/regedit.elf: $(BUILD_DIR)/$(USER_DIR)/bin/regedit.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/writetest.elf: $(BUILD_DIR)/$(USER_DIR)/bin/writetest.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
+$(BUILD_DIR)/input_test.elf: $(BUILD_DIR)/$(USER_DIR)/bin/input_test.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
+$(BUILD_DIR)/fontman.elf: $(BUILD_DIR)/$(USER_DIR)/bin/fontman/fontman.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
+
+$(BUILD_DIR)/$(USER_DIR)/bin/fontman/%.o: $(USER_DIR)/bin/fontman/%.c
+	@mkdir -p $(dir $@)
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 
 # Linking rule for user ELFs
@@ -326,6 +339,8 @@ rootfs: user
 	@-cp user/bin/doomgeneric-master/DOOM_wads-master/doom.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
 	@-cp user/bin/doomgeneric-master/DOOM_wads-master/doom1.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
 	@-cp user/bin/doomgeneric-master/DOOM_wads-master/doom2.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
+	@mkdir -p $(BUILD_DIR)/rootfs/fonts
+	@-cp user/bin/fontman/fonts/*.ttf $(BUILD_DIR)/rootfs/fonts/ 2>/dev/null || true
 	@for f in $(BUILD_DIR)/rootfs/bin/*.elf; do mv "$$f" "$${f%.elf}"; done
 
 disk: $(MKDISK) kernel rootfs bootloader
@@ -341,7 +356,7 @@ $(MKDISK): tools/mkdisk.c
 # ==============================================================================
 
 ifeq ($(ARCH), amd64)
-QEMU_FLAGS = -m 3G -smp 8 -serial mon:stdio \
+QEMU_FLAGS = -m 3G -smp 4 -serial mon:stdio \
              -display default,show-cursor=on \
              -device virtio-gpu-pci,disable-legacy=on,disable-modern=off \
              -device virtio-keyboard-pci,disable-legacy=on,disable-modern=off \
@@ -349,19 +364,19 @@ QEMU_FLAGS = -m 3G -smp 8 -serial mon:stdio \
              -drive if=none,file=$(DISK_IMG),id=hd0,format=raw \
              -device virtio-blk-pci,drive=hd0,disable-legacy=on,disable-modern=off
 
-QEMU_RELEASE_FLAGS = -m 3G -smp 8 -serial mon:stdio \
+QEMU_RELEASE_FLAGS = -m 3G -smp 4 -serial mon:stdio \
                      -display default,show-cursor=on \
                      -device virtio-gpu-pci,disable-legacy=on,disable-modern=off \
                      -device virtio-keyboard-pci,disable-legacy=on,disable-modern=off \
                      -device virtio-mouse-pci,disable-legacy=on,disable-modern=off
 else
-QEMU_FLAGS = -M virt -cpu cortex-a57 -m 3G -smp 8 -serial mon:stdio \
+QEMU_FLAGS = -M virt -cpu cortex-a57 -m 3G -smp 4 -serial mon:stdio \
              -display default,show-cursor=on \
              -device virtio-gpu-device \
              -device virtio-keyboard-device -device virtio-mouse-device \
              -drive if=none,file=$(DISK_IMG),id=hd0,format=raw -device virtio-blk-device,drive=hd0
 
-QEMU_RELEASE_FLAGS = -M virt -cpu cortex-a57 -m 3G -smp 8 -serial mon:stdio \
+QEMU_RELEASE_FLAGS = -M virt -cpu cortex-a57 -m 3G -smp 4 -serial mon:stdio \
                      -display default,show-cursor=on \
                      -device virtio-gpu-device \
                      -device virtio-keyboard-device -device virtio-mouse-device \
