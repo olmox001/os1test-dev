@@ -77,8 +77,9 @@ GRUB_MKRESCUE := $(shell command -v i686-elf-grub-mkrescue 2>/dev/null || comman
 BUILD_ROOT = build
 BUILD_DIR  = $(BUILD_ROOT)/$(ARCH)
 USER_DIR   = user
-USER_LIB_DIR = $(USER_DIR)/lib
-USER_BIN_DIR = $(USER_DIR)/bin
+USER_SYS_DIR = $(USER_DIR)/sys
+USER_LIB_DIR = $(USER_SYS_DIR)/lib
+USER_BIN_DIR = $(USER_SYS_DIR)/bin
 USER_ARCH_DIR = $(USER_DIR)/arch/$(ARCH)
 INCLUDE    = -I$(KERNEL_DIR)/include -I$(ARCH_DIR)/include -Iinclude/api
 
@@ -237,8 +238,9 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/drivers/pci
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/lib
+	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/sys/lib
+	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/sys/bin
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/bin
-	@mkdir -p $(BUILD_DIR)/$(USER_ARCH_DIR)
 	@mkdir -p $(BUILD_DIR)/$(USER_ARCH_DIR)
 
 # Bootloader
@@ -261,18 +263,19 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 
 # Userland
 USER_SYSCALL_O = $(BUILD_DIR)/$(USER_ARCH_DIR)/syscall.o
-USER_LIB_O     = $(BUILD_DIR)/$(USER_DIR)/lib/lib.o
-USER_MALLOC_O  = $(BUILD_DIR)/$(USER_DIR)/lib/malloc.o
+USER_LIB_O     = $(BUILD_DIR)/$(USER_SYS_DIR)/lib/lib.o
+USER_MALLOC_O  = $(BUILD_DIR)/$(USER_SYS_DIR)/lib/malloc.o
 
-USER_ELFS = $(BUILD_DIR)/init.elf $(BUILD_DIR)/counter.elf $(BUILD_DIR)/shell.elf \
-            $(BUILD_DIR)/demo3d.elf $(BUILD_DIR)/ipc_send.elf $(BUILD_DIR)/ipc_recv.elf \
-            $(BUILD_DIR)/notify_srv.elf $(BUILD_DIR)/crash.elf $(BUILD_DIR)/regedit.elf \
-            $(BUILD_DIR)/writetest.elf $(BUILD_DIR)/doom.elf $(BUILD_DIR)/input_test.elf \
-            $(BUILD_DIR)/fontman.elf
-USER_TARGETS = $(USER_DIR)/bin/shell.elf $(USER_DIR)/bin/ls.elf $(USER_DIR)/bin/cat.elf \
-               $(USER_DIR)/bin/mkdir.elf $(USER_DIR)/bin/ps.elf $(USER_DIR)/bin/demo.elf \
-               $(USER_DIR)/bin/demo3d.elf $(USER_DIR)/bin/doom.elf $(USER_DIR)/bin/input_test.elf \
-               $(USER_DIR)/bin/fontman.elf
+# System ELFs (placed in /sys/bin)
+SYS_ELFS = $(BUILD_DIR)/init.elf $(BUILD_DIR)/shell.elf $(BUILD_DIR)/notify_srv.elf \
+           $(BUILD_DIR)/regedit.elf $(BUILD_DIR)/fontman.elf
+
+# User ELFs (placed in /bin)
+BIN_ELFS = $(BUILD_DIR)/counter.elf $(BUILD_DIR)/demo3d.elf $(BUILD_DIR)/ipc_send.elf \
+           $(BUILD_DIR)/ipc_recv.elf $(BUILD_DIR)/crash.elf $(BUILD_DIR)/writetest.elf \
+           $(BUILD_DIR)/doom.elf $(BUILD_DIR)/input_test.elf
+
+USER_ELFS = $(SYS_ELFS) $(BIN_ELFS)
 
 user: $(USER_ELFS)
 
@@ -281,25 +284,33 @@ $(BUILD_DIR)/$(USER_DIR)/lib/%.o: $(USER_DIR)/lib/%.c
 	@mkdir -p $(dir $@)
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/$(USER_DIR)/sys/lib/%.o: $(USER_DIR)/sys/lib/%.c
+	@mkdir -p $(dir $@)
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/$(USER_DIR)/bin/%.o: $(USER_DIR)/bin/%.c
 	@mkdir -p $(dir $@)
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/$(USER_DIR)/sys/bin/%.o: $(USER_DIR)/sys/bin/%.c
+	@mkdir -p $(dir $@)
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 # Explicit dependencies for each user ELF
-$(BUILD_DIR)/init.elf: $(BUILD_DIR)/$(USER_DIR)/bin/init.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
+$(BUILD_DIR)/init.elf: $(BUILD_DIR)/$(USER_DIR)/sys/bin/init.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/counter.elf: $(BUILD_DIR)/$(USER_DIR)/bin/counter.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
-$(BUILD_DIR)/shell.elf: $(BUILD_DIR)/$(USER_DIR)/bin/shell.o $(BUILD_DIR)/$(USER_DIR)/bin/proce.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
+$(BUILD_DIR)/shell.elf: $(BUILD_DIR)/$(USER_DIR)/sys/bin/shell.o $(BUILD_DIR)/$(USER_DIR)/sys/bin/proce.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/demo3d.elf: $(BUILD_DIR)/$(USER_DIR)/bin/demo3d.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/ipc_send.elf: $(BUILD_DIR)/$(USER_DIR)/bin/ipc_send.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/ipc_recv.elf: $(BUILD_DIR)/$(USER_DIR)/bin/ipc_recv.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
-$(BUILD_DIR)/notify_srv.elf: $(BUILD_DIR)/$(USER_DIR)/bin/notification_server.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
+$(BUILD_DIR)/notify_srv.elf: $(BUILD_DIR)/$(USER_DIR)/sys/bin/notification_server.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/crash.elf: $(BUILD_DIR)/$(USER_DIR)/bin/crash.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
-$(BUILD_DIR)/regedit.elf: $(BUILD_DIR)/$(USER_DIR)/bin/regedit.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
+$(BUILD_DIR)/regedit.elf: $(BUILD_DIR)/$(USER_DIR)/sys/bin/regedit.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/writetest.elf: $(BUILD_DIR)/$(USER_DIR)/bin/writetest.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/input_test.elf: $(BUILD_DIR)/$(USER_DIR)/bin/input_test.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
-$(BUILD_DIR)/fontman.elf: $(BUILD_DIR)/$(USER_DIR)/bin/fontman/fontman.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
+$(BUILD_DIR)/fontman.elf: $(BUILD_DIR)/$(USER_DIR)/sys/bin/fontman/fontman.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 
-$(BUILD_DIR)/$(USER_DIR)/bin/fontman/%.o: $(USER_DIR)/bin/fontman/%.c
+$(BUILD_DIR)/$(USER_DIR)/sys/bin/fontman/%.o: $(USER_DIR)/sys/bin/fontman/%.c
 	@mkdir -p $(dir $@)
 	@$(CC) $(CFLAGS) -c $< -o $@
 
@@ -329,20 +340,27 @@ $(BUILD_DIR)/%.o: %.cpp
 
 # Disk Generation
 rootfs: user
+	@rm -rf $(BUILD_DIR)/rootfs
+	@mkdir -p $(BUILD_DIR)/rootfs/sys/bin
 	@mkdir -p $(BUILD_DIR)/rootfs/bin
 	@mkdir -p $(BUILD_DIR)/rootfs/etc
-	@cp $(USER_ELFS) $(BUILD_DIR)/rootfs/bin/
-	@cp user/bin/init.cfg $(BUILD_DIR)/rootfs/etc/
+	@mkdir -p $(BUILD_DIR)/rootfs/sys/lib
+	@mkdir -p $(BUILD_DIR)/rootfs/lib
+	@cp $(SYS_ELFS) $(BUILD_DIR)/rootfs/sys/bin/
+	@cp $(BIN_ELFS) $(BUILD_DIR)/rootfs/bin/
+	@cp user/sys/bin/init.cfg $(BUILD_DIR)/rootfs/etc/
 	@# Copy essential WAD files to the root and /bin for engine detection
-	@-cp user/bin/doomgeneric-master/DOOM_wads-master/doom.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
-	@-cp user/bin/doomgeneric-master/DOOM_wads-master/doom1.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
-	@-cp user/bin/doomgeneric-master/DOOM_wads-master/doom2.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
-	@-cp user/bin/doomgeneric-master/DOOM_wads-master/doom.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
-	@-cp user/bin/doomgeneric-master/DOOM_wads-master/doom1.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
-	@-cp user/bin/doomgeneric-master/DOOM_wads-master/doom2.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
+	@-cp user/bin/doom/doom.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
+	@-cp user/bin/doom/doom1.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
+	@-cp user/bin/doom/doom2.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
+	@-cp user/bin/doom/doom.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
+	@-cp user/bin/doom/doom1.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
+	@-cp user/bin/doom/doom2.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
 	@mkdir -p $(BUILD_DIR)/rootfs/fonts
-	@-cp user/bin/fontman/fonts/*.ttf $(BUILD_DIR)/rootfs/fonts/ 2>/dev/null || true
-	@-cp user/bin/fontman/fonts/*.off $(BUILD_DIR)/rootfs/fonts/ 2>/dev/null || true
+	@-cp user/sys/bin/fontman/fonts/*.ttf $(BUILD_DIR)/rootfs/fonts/ 2>/dev/null || true
+	@-cp user/sys/bin/fontman/fonts/*.off $(BUILD_DIR)/rootfs/fonts/ 2>/dev/null || true
+	@# Remove .elf extensions in rootfs
+	@for f in $(BUILD_DIR)/rootfs/sys/bin/*.elf; do mv "$$f" "$${f%.elf}"; done
 	@for f in $(BUILD_DIR)/rootfs/bin/*.elf; do mv "$$f" "$${f%.elf}"; done
 
 disk: $(MKDISK) kernel rootfs bootloader
@@ -484,23 +502,9 @@ help:
 	@echo "  run          - Build and run kernel directly"
 	@echo "  clean        - Remove build artifacts"
 
-DOOM_DIR = user/bin/doomgeneric-master/doomgeneric
-DOOM_SRC = am_map.c doomdef.c doomstat.c dstrings.c d_event.c d_items.c d_iwad.c d_loop.c d_main.c d_mode.c d_net.c f_finale.c f_wipe.c g_game.c hu_lib.c hu_stuff.c info.c i_cdmus.c i_endoom.c i_joystick.c i_scale.c i_sound.c i_system.c i_timer.c memio.c m_argv.c m_bbox.c m_cheat.c m_config.c m_controls.c m_fixed.c m_menu.c m_misc.c m_random.c p_ceilng.c p_doors.c p_enemy.c p_floor.c p_inter.c p_lights.c p_map.c p_maputl.c p_mobj.c p_plats.c p_pspr.c p_saveg.c p_setup.c p_sight.c p_spec.c p_switch.c p_telept.c p_tick.c p_user.c r_bsp.c r_data.c r_draw.c r_main.c r_plane.c r_segs.c r_sky.c r_things.c sha1.c sounds.c statdump.c st_lib.c st_stuff.c s_sound.c tables.c v_video.c wi_stuff.c w_checksum.c w_file.c w_main.c w_wad.c z_zone.c w_file_stdc.c i_input.c i_video.c doomgeneric.c dummy.c
-DOOM_OBJS = $(addprefix $(BUILD_DIR)/$(DOOM_DIR)/, $(DOOM_SRC:.c=.o))
-DOOM_PLATFORM_OBJ = $(BUILD_DIR)/user/bin/doomgeneric_os1.o
-
-# Doom code is legacy, relax strict warnings
-DOOM_CFLAGS = -w -ffreestanding -fno-builtin -nostdlib -nostartfiles -fno-common -O2 -g $(ARCH_CFLAGS) $(INCLUDE)
-DOOM_CFLAGS += -I$(DOOM_DIR) -DNORMALUNIX
-
-$(BUILD_DIR)/doom.elf: $(DOOM_OBJS) $(DOOM_PLATFORM_OBJ) $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
-	echo "[Linking Doom]"
-	$(CC) $(DOOM_CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
-
-$(DOOM_PLATFORM_OBJ): user/bin/doomgeneric_os1.c
-	mkdir -p $(dir $@)
-	$(CC) $(DOOM_CFLAGS) -c $< -o $@
-
-$(DOOM_OBJS): $(BUILD_DIR)/$(DOOM_DIR)/%.o: $(DOOM_DIR)/%.c
-	mkdir -p $(dir $@)
-	$(CC) $(DOOM_CFLAGS) -I$(DOOM_DIR) -DNORMALUNIX -c $< -o $@
+# Include architecture-specific Doom makefiles
+ifeq ($(ARCH), aarch64)
+    include user/bin/doom/doom-nexs-aarch64.make
+else ifeq ($(ARCH), amd64)
+    include user/bin/doom/doom-nexs-amd64.make
+endif
