@@ -3,7 +3,8 @@
 ### Production-Ready AArch64 Microkernel with Graphics & Multitasking
 
 <div align="center">
-<img width="719" height="1018" alt="Screenshot 2026-05-11 alle 10 41 58" src="https://github.com/user-attachments/assets/eeefd28d-0009-4be7-bbf2-c3451cbe08d8" />
+<img width="1281" height="1007" alt="Screenshot 2026-05-14 alle 05 02 06" src="https://github.com/user-attachments/assets/2c7b31ac-39ff-46a0-9da0-a352a9b30406" />
+
 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
