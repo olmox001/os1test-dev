@@ -89,11 +89,11 @@ struct process {
   struct vnode *root_vn; /* Root vnode for this process (isolation) */
   struct vnode *cwd_vn;  /* Current working directory vnode */
   spinlock_t vfs_lock;   /* Protects per-process VFS operations */
-  int type;              /* Process privilege type */
+  int type;        /* Process privilege type */
 
   /* Auth / Identity */
-  uid_t uid;         /* User ID */
-  gid_t gid;         /* Group ID */
+  uid_t uid;       /* User ID */
+  gid_t gid;       /* Group ID */
   char username[32]; /* Username string */
 };
 
@@ -117,11 +117,11 @@ struct process {
 #define PROC_PRIO_IDLE 31  /* Idle task */
 
 /* Process Privilege Types */
-#define PROC_TYPE_MACHINE 0 /* 00: Kernel/CPU/Drivers */
-#define PROC_TYPE_ROOT 1    /* 01: System/Root */
-#define PROC_TYPE_USER 2    /* 02-97: Standard User */
-#define PROC_TYPE_GUEST 3   /* 98: Guest */
-#define PROC_TYPE_TEMP 4    /* 99: Cache/Temp */
+#define PROC_TYPE_MACHINE 0  /* 00: Kernel/CPU/Drivers */
+#define PROC_TYPE_ROOT    1  /* 01: System/Root */
+#define PROC_TYPE_USER    2  /* 02-97: Standard User */
+#define PROC_TYPE_GUEST   3  /* 98: Guest */
+#define PROC_TYPE_TEMP    4  /* 99: Cache/Temp */
 
 /* Process Permissions */
 #define PROC_PERM_SYSTEM (1 << 0) /* Cannot be killed, has kernel access */

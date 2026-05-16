@@ -2,22 +2,21 @@
  * kernel/core/syscall_dispatch.c
  * Architecture-Agnostic Syscall Dispatcher
  */
-#include <arch/pt_regs.h>
-#include <kernel/cpu.h>
-#include <kernel/kmalloc.h>
-#include <kernel/printk.h>
-#include <kernel/sched.h>
-#include <kernel/string.h>
 #include <kernel/types.h>
+#include <arch/pt_regs.h>
+#include <kernel/sched.h>
+#include <kernel/printk.h>
+#include <kernel/cpu.h>
+#include <kernel/string.h>
+#include <kernel/kmalloc.h>
 #include <kernel/vfs.h>
 #include <kernel/vfs_bsd.h>
 
-#define SYSBIN_PATH "/sys/bin/"
+#define SYSBIN_PATH     "/sys/bin/"
 #define SYSBIN_PATH_LEN 9
 
-/* These syscall implementations are currently still in
- * arch/<ARCH>/cpu/syscall.c or will be moved here gradually. For now, we
- * declare them extern.
+/* These syscall implementations are currently still in arch/<ARCH>/cpu/syscall.c
+ * or will be moved here gradually. For now, we declare them extern.
  */
 extern long sys_write(int fd, const char *buf, size_t count);
 extern struct pt_regs *sys_read(struct pt_regs *regs);
@@ -27,12 +26,9 @@ extern long sys_get_time(void);
 
 extern void graphics_draw_rect(int x, int y, int w, int h, uint32_t color);
 extern void compositor_render(void);
-extern int compositor_create_window(int x, int y, int w, int h,
-                                    const char *title, int pid);
-extern void compositor_draw_rect(int window_id, int x, int y, int w, int h,
-                                 uint32_t color, int caller_pid);
-extern void compositor_blit(int win_id, int x, int y, int w, int h,
-                            const uint32_t *buf, int pid);
+extern int compositor_create_window(int x, int y, int w, int h, const char *title, int pid);
+extern void compositor_draw_rect(int window_id, int x, int y, int w, int h, uint32_t color, int caller_pid);
+extern void compositor_blit(int win_id, int x, int y, int w, int h, const uint32_t *buf, int pid);
 extern void compositor_set_window_flags(int window_id, int flags);
 extern void compositor_destroy_window(int window_id);
 extern void compositor_window_write(int win_id, const char *buf, size_t count);
@@ -46,17 +42,14 @@ extern int sys_ipc_try_recv(int src_pid, void *msg_ptr);
 
 extern long sys_registry(int op, const char *key, char *value, size_t size);
 int sys_set_font(void *data, size_t size);
-extern int ext4_write_file(const char *path, const uint8_t *buf, uint32_t size,
-                           uint32_t offset);
-extern int ext4_read_file(const char *path, uint8_t *buf, uint32_t size,
-                          uint32_t offset);
+extern int ext4_write_file(const char *path, const uint8_t *buf, uint32_t size, uint32_t offset);
+extern int ext4_read_file(const char *path, uint8_t *buf, uint32_t size, uint32_t offset);
 extern int ext4_list_dir(const char *path, char *buf, uint32_t size);
 extern int ext4_find_inode(const char *path, uint32_t *ino_out);
 
 extern int arch_copy_from_user(void *dest, const void *src, size_t n);
 extern int arch_copy_to_user(void *dest, const void *src, size_t n);
-extern int arch_copy_string_from_user(char *dest, const char *src,
-                                      size_t max_len);
+extern int arch_copy_string_from_user(char *dest, const char *src, size_t max_len);
 
 extern int keyboard_focus_pid;
 
@@ -75,8 +68,7 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
   case 63: /* READ */
     return sys_read(frame);
   case 64: /* WRITE */
-    pt_regs_set_return(frame,
-                       sys_write((int)arg0, (const char *)arg1, (size_t)arg2));
+    pt_regs_set_return(frame, sys_write((int)arg0, (const char *)arg1, (size_t)arg2));
     break;
   case 93: /* EXIT */
     sys_exit((int)arg0);
@@ -97,8 +89,7 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     pt_regs_set_return(frame, sys_ipc_try_recv((int)arg0, (void *)arg1));
     break;
   case 200: /* DRAW */
-    graphics_draw_rect((int)arg0, (int)arg1, (int)arg2, (int)arg3,
-                       (uint32_t)arg4);
+    graphics_draw_rect((int)arg0, (int)arg1, (int)arg2, (int)arg3, (uint32_t)arg4);
     pt_regs_set_return(frame, 0);
     break;
   case 201: /* FLUSH */
@@ -113,13 +104,10 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       pt_regs_set_return(frame, -1);
       break;
     }
-    pt_regs_set_return(frame, compositor_create_window(
-                                  (int)arg0, (int)arg1, (int)arg2, (int)arg3,
-                                  k_title, current_process->pid));
+    pt_regs_set_return(frame, compositor_create_window((int)arg0, (int)arg1, (int)arg2, (int)arg3, k_title, current_process->pid));
   } break;
   case 211: /* WINDOW_DRAW */
-    compositor_draw_rect((int)arg0, (int)arg1, (int)arg2, (int)arg3, (int)arg4,
-                         (uint32_t)arg5, current_process->pid);
+    compositor_draw_rect((int)arg0, (int)arg1, (int)arg2, (int)arg3, (int)arg4, (uint32_t)arg5, current_process->pid);
     pt_regs_set_return(frame, 0);
     break;
   case 212: /* COMPOSITOR_RENDER */
@@ -127,8 +115,7 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     pt_regs_set_return(frame, 0);
     break;
   case 213: /* WINDOW_BLIT */
-    compositor_blit((int)arg0, (int)arg1, (int)arg2, (int)arg3, (int)arg4,
-                    (const uint32_t *)arg5, current_process->pid);
+    compositor_blit((int)arg0, (int)arg1, (int)arg2, (int)arg3, (int)arg4, (const uint32_t *)arg5, current_process->pid);
     pt_regs_set_return(frame, 0);
     break;
   case 214: /* WINDOW_SET_FLAGS */
@@ -151,25 +138,20 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       break;
     }
     arch_local_irq_disable();
-
+    
     /* Path Resolution & Lookup via new VFS */
     struct vnode *bin_vn = NULL;
-    int lookup_res = vfs_lookup(current_process->root_vn, k_path, &bin_vn,
-                                current_process->uid);
-
+    int lookup_res = vfs_lookup(current_process->root_vn, k_path, &bin_vn, current_process->uid);
+    
     if (lookup_res != 0) {
-      pr_err("Syscall: Spawn failed for %s (Lookup error %d)\n", k_path,
-             lookup_res);
+      pr_err("Syscall: Spawn failed for %s (Lookup error %d)\n", k_path, lookup_res);
       pt_regs_set_return(frame, -1);
       arch_local_irq_enable();
       break;
     }
 
-    uint32_t new_perm = (strncmp(k_path, SYSBIN_PATH, SYSBIN_PATH_LEN) == 0)
-                            ? PROC_PERM_ROOT
-                            : PROC_PERM_USER;
-    struct process *new_proc =
-        process_create(k_path, current_process->priority, new_perm);
+    uint32_t new_perm = (strncmp(k_path, SYSBIN_PATH, SYSBIN_PATH_LEN) == 0) ? PROC_PERM_ROOT : PROC_PERM_USER;
+    struct process *new_proc = process_create(k_path, current_process->priority, new_perm);
     if (new_proc) {
       if (process_load_elf(new_proc, bin_vn) == 0) {
         enqueue_task(new_proc);
@@ -188,20 +170,18 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     int pid = (int)arg0;
     struct process *target = process_find_by_pid(pid);
     if (!target) {
-      pt_regs_set_return(frame, -1);
+        pt_regs_set_return(frame, -1);
     } else {
-      /* Auth Alignment: Check if current process has authority to kill target
-       */
-      if (!(current_process->permissions &
-            (PROC_PERM_SYSTEM | PROC_PERM_ROOT)) &&
-          current_process->pid != target->pid) {
-        pt_regs_set_return(frame, -1);
-      } else if ((target->permissions & PROC_PERM_SYSTEM) &&
-                 !(current_process->permissions & PROC_PERM_SYSTEM)) {
-        pt_regs_set_return(frame, -1);
-      } else {
-        pt_regs_set_return(frame, process_terminate(pid));
-      }
+        /* Auth Alignment: Check if current process has authority to kill target */
+        if (!(current_process->permissions & (PROC_PERM_SYSTEM | PROC_PERM_ROOT)) &&
+            current_process->pid != target->pid) {
+            pt_regs_set_return(frame, -1);
+        } else if ((target->permissions & PROC_PERM_SYSTEM) && 
+                   !(current_process->permissions & PROC_PERM_SYSTEM)) {
+            pt_regs_set_return(frame, -1);
+        } else {
+            pt_regs_set_return(frame, process_terminate(pid));
+        }
     }
   } break;
   case 222: /* GETPROCS */
@@ -211,8 +191,7 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     return schedule(frame);
   case 230: /* SEND (IPC) */
     pt_regs_set_return(frame, sys_ipc_send((int)arg0, (void *)arg1));
-    if (pt_regs_arg(frame, 0) == 0)
-      return schedule(frame);
+    if (pt_regs_arg(frame, 0) == 0) return schedule(frame);
     break;
   case 231: /* RECV (IPC) */
     pt_regs_set_return(frame, sys_ipc_recv((int)arg0, (void *)arg1));
@@ -225,8 +204,7 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     pt_regs_set_return(frame, process_wait((int)arg0));
     break;
   case 250: /* REGISTRY */
-    pt_regs_set_return(frame, sys_registry((int)arg0, (const char *)arg1,
-                                           (char *)arg2, (size_t)arg3));
+    pt_regs_set_return(frame, sys_registry((int)arg0, (const char *)arg1, (char *)arg2, (size_t)arg3));
     break;
   case 251: /* FILE_WRITE */
   {
@@ -236,10 +214,9 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       pt_regs_set_return(frame, -1);
       break;
     }
-
+    
     struct vnode *vp = NULL;
-    if (vfs_lookup(current_process->cwd_vn, k_path, &vp,
-                   current_process->uid) != 0) {
+    if (vfs_lookup(current_process->cwd_vn, k_path, &vp, current_process->uid) != 0) {
       pt_regs_set_return(frame, -1);
       break;
     }
@@ -266,10 +243,9 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       pt_regs_set_return(frame, -1);
       break;
     }
-
+    
     struct vnode *vp = NULL;
-    if (vfs_lookup(current_process->cwd_vn, k_path, &vp,
-                   current_process->uid) != 0) {
+    if (vfs_lookup(current_process->cwd_vn, k_path, &vp, current_process->uid) != 0) {
       pt_regs_set_return(frame, -1);
       break;
     }
@@ -281,9 +257,9 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       /* Get size via getattr */
       struct vattr va;
       if (VOP_GETATTR(vp, &va) == 0) {
-        pt_regs_set_return(frame, (int)va.va_size);
+          pt_regs_set_return(frame, (int)va.va_size);
       } else {
-        pt_regs_set_return(frame, -1);
+          pt_regs_set_return(frame, -1);
       }
     } else {
       uint8_t *k_buf = kmalloc(size);
@@ -315,10 +291,9 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       pt_regs_set_return(frame, -1);
       break;
     }
-
+    
     struct vnode *vp = NULL;
-    if (vfs_lookup(current_process->cwd_vn, k_path, &vp,
-                   current_process->uid) != 0) {
+    if (vfs_lookup(current_process->cwd_vn, k_path, &vp, current_process->uid) != 0) {
       pt_regs_set_return(frame, -1);
       break;
     }
@@ -350,40 +325,37 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
       pt_regs_set_return(frame, -1);
       break;
     }
-
+    
     struct vnode *vp = NULL;
-    if (vfs_lookup(current_process->cwd_vn, k_path, &vp,
-                   current_process->uid) == 0) {
-      if (vp->v_type != VDIR) {
-        pt_regs_set_return(frame, -1);
-        break;
-      }
+    if (vfs_lookup(current_process->cwd_vn, k_path, &vp, current_process->uid) == 0) {
+       if (vp->v_type != VDIR) {
+           pt_regs_set_return(frame, -1);
+           break;
+       }
 
-      struct vnode *old_cwd = current_process->cwd_vn;
-      current_process->cwd_vn = vp;
-      if (old_cwd && old_cwd != vp)
-        vrele(old_cwd);
+       struct vnode *old_cwd = current_process->cwd_vn;
+       current_process->cwd_vn = vp;
+       if (old_cwd && old_cwd != vp) vrele(old_cwd);
 
-      /* Update string CWD */
-      if (k_path[0] == '/') {
-        strncpy(current_process->cwd, k_path, 128);
-      } else {
-        /* Relative path append */
-        size_t len = strlen(current_process->cwd);
-        if (len > 0 && current_process->cwd[len - 1] != '/') {
-          strncat(current_process->cwd, "/", 128 - len - 1);
-        }
-        strncat(current_process->cwd, k_path,
-                128 - strlen(current_process->cwd) - 1);
-      }
-      /* Normalize path (remove trailing slash if not root) */
-      size_t new_len = strlen(current_process->cwd);
-      if (new_len > 1 && current_process->cwd[new_len - 1] == '/') {
-        current_process->cwd[new_len - 1] = '\0';
-      }
-      pt_regs_set_return(frame, 0);
+       /* Update string CWD */
+       if (k_path[0] == '/') {
+           strncpy(current_process->cwd, k_path, 128);
+       } else {
+           /* Relative path append */
+           size_t len = strlen(current_process->cwd);
+           if (len > 0 && current_process->cwd[len-1] != '/') {
+               strncat(current_process->cwd, "/", 128 - len - 1);
+           }
+           strncat(current_process->cwd, k_path, 128 - strlen(current_process->cwd) - 1);
+       }
+       /* Normalize path (remove trailing slash if not root) */
+       size_t new_len = strlen(current_process->cwd);
+       if (new_len > 1 && current_process->cwd[new_len-1] == '/') {
+           current_process->cwd[new_len-1] = '\0';
+       }
+       pt_regs_set_return(frame, 0);
     } else {
-      pt_regs_set_return(frame, -1);
+       pt_regs_set_return(frame, -1);
     }
   } break;
   case 256: /* GETCWD */
@@ -413,8 +385,8 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     break;
   }
 
-  /* For IPC SEND: if we returned 0, we should yield, but since I can't read the
-     return easily, I'll fix it below */
+  /* For IPC SEND: if we returned 0, we should yield, but since I can't read the return easily,
+     I'll fix it below */
   return frame;
 }
 
@@ -445,8 +417,7 @@ struct pt_regs *sys_read(struct pt_regs *regs) {
          */
         if (node->msg.data2 != 0) {
           char c = (char)node->msg.data1;
-          if (arch_copy_to_user(buf, &c, 1) != 0) {
-          }
+          if (arch_copy_to_user(buf, &c, 1) != 0) { }
           pt_regs_set_return(regs, 1);
           kfree(node);
           return regs;
@@ -469,8 +440,7 @@ struct pt_regs *sys_read(struct pt_regs *regs) {
 extern void uart_puts(const char *str);
 
 long sys_write(int fd, const char *buf, size_t count) {
-  if (count == 0)
-    return 0;
+  if (count == 0) return 0;
   struct cpu_info *cpu = get_cpu_info();
   char *k_buf = cpu->syscall_buf;
   size_t to_copy = (count >= 1024) ? 1023 : count;
@@ -482,7 +452,7 @@ long sys_write(int fd, const char *buf, size_t count) {
   /* Debug: Always output to UART */
   uart_puts(k_buf);
 
-  if (fd >= 100) {
+  if (fd >= 100) { 
     compositor_window_write(fd, k_buf, to_copy);
     return (long)to_copy;
   }

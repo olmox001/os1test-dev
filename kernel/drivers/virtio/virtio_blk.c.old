@@ -20,8 +20,7 @@ static struct vring_desc *desc;
 static struct vring_avail *avail;
 static struct vring_used *used;
 
-/* Serializes all ring buffer operations — desc[]/avail/used are not re-entrant
- */
+/* Serializes all ring buffer operations — desc[]/avail/used are not re-entrant */
 static spinlock_t virtio_blk_lock = SPINLOCK_INIT;
 
 int virtio_blk_is_ready(void) {

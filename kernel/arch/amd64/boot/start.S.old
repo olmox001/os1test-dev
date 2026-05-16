@@ -179,6 +179,19 @@ _start_64:
 
     lgdt (boot_gdtr_64)
     
+    /* Set up GS base for CPU 0 (BSP) so get_cpu_info() works early */
+    movabsq $cpu_data, %rax
+    movq $0xC0000101, %rcx /* IA32_GS_BASE */
+    movq %rax, %rdx
+    shrq $32, %rdx
+    /* wrmsr takes %edx:%eax */
+    wrmsr
+    
+    /* Debug: Print 'J' */
+    movb $'J', %al
+    movw $0x3f8, %dx
+    outb %al, %dx
+
     movq mb_magic(%rip), %rdi
     movq mb_info_ptr(%rip), %rsi
     call kernel_main
@@ -189,10 +202,9 @@ _start_64:
 
 .global secondary_cpu_entry
 secondary_cpu_entry:
-    cli
-    /* Debug: Print 'S' */
+    /* Debug: Print 'L' */
     movw $0x3f8, %dx
-    movb $'S', %al
+    movb $'L', %al
     outb %al, %dx
 
     /* Setup segments for 64-bit mode */

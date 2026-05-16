@@ -27,8 +27,7 @@ static int rr_cpu = 0;
 int keyboard_focus_pid = 7; /* Default to Shell PID */
 
 /* Helper: Add task to runqueue */
-/* Internal helper: Add task to runqueue (Caller MUST hold target->sched_lock)
- */
+/* Internal helper: Add task to runqueue (Caller MUST hold target->sched_lock) */
 static void __enqueue_task(struct process *p) {
   int target_cpu_id = (int)p->on_cpu;
   if (target_cpu_id < 0)
@@ -264,58 +263,57 @@ struct process *process_create(const char *name, uint8_t priority,
 
   /* Assign Privilege Type, VRoot and Auth based on name/path/priority/PID */
   if (strcmp(name, "idle") == 0 || strcmp(name, "kernel") == 0) {
-    proc->type = PROC_TYPE_MACHINE;
-    strncpy(proc->vroot, "/00", sizeof(proc->vroot));
-    proc->uid = PROC_UID_ROOT;
-    proc->gid = 0;
-    strncpy(proc->username, "kernel", 32);
+      proc->type = PROC_TYPE_MACHINE;
+      strncpy(proc->vroot, "/00", sizeof(proc->vroot));
+      proc->uid = PROC_UID_ROOT;
+      proc->gid = 0;
+      strncpy(proc->username, "kernel", 32);
   } else if (proc->pid == 98) {
-    proc->type = PROC_TYPE_GUEST;
-    strncpy(proc->vroot, "/guest", sizeof(proc->vroot));
-    proc->uid = 98;
-    proc->gid = 98;
-    strncpy(proc->username, "guest", 32);
+      proc->type = PROC_TYPE_GUEST;
+      strncpy(proc->vroot, "/guest", sizeof(proc->vroot));
+      proc->uid = 98;
+      proc->gid = 98;
+      strncpy(proc->username, "guest", 32);
   } else if (proc->pid == 99) {
-    proc->type = PROC_TYPE_TEMP;
-    strncpy(proc->vroot, "/cache", sizeof(proc->vroot));
-    proc->uid = 99;
-    proc->gid = 99;
-    strncpy(proc->username, "cache", 32);
+      proc->type = PROC_TYPE_TEMP;
+      strncpy(proc->vroot, "/cache", sizeof(proc->vroot));
+      proc->uid = 99;
+      proc->gid = 99;
+      strncpy(proc->username, "cache", 32);
   } else if (strstr(name, "/sys/")) {
-    proc->type = PROC_TYPE_ROOT;
-    strncpy(proc->vroot, "/sys", sizeof(proc->vroot));
-    proc->uid = PROC_UID_ROOT;
-    proc->gid = 0;
-    strncpy(proc->username, "root", 32);
-  } else if (strstr(name, "/user/")) {
-    proc->type = PROC_TYPE_USER;
-    strncpy(proc->vroot, "/user", sizeof(proc->vroot));
-    proc->uid = PROC_UID_NEXS;
-    proc->gid = 1000;
-    strncpy(proc->username, "nexs", 32);
-
-    /* User processes have /user as their root */
-    struct vnode *user_root = NULL;
-    if (vfs_lookup(vfs_get_root(), "/user", &user_root, PROC_UID_ROOT) == 0) {
-      proc->root_vn = user_root;
-      proc->cwd_vn = user_root;
-    }
-  } else {
-    /* PID 1 (Init) is special: it sees the whole physical disk to spawn others
-     */
-    if (proc->pid == 1) {
       proc->type = PROC_TYPE_ROOT;
-      strncpy(proc->vroot, "/", sizeof(proc->vroot));
+      strncpy(proc->vroot, "/sys", sizeof(proc->vroot));
       proc->uid = PROC_UID_ROOT;
       proc->gid = 0;
       strncpy(proc->username, "root", 32);
-    } else {
+  } else if (strstr(name, "/user/")) {
       proc->type = PROC_TYPE_USER;
       strncpy(proc->vroot, "/user", sizeof(proc->vroot));
       proc->uid = PROC_UID_NEXS;
       proc->gid = 1000;
       strncpy(proc->username, "nexs", 32);
-    }
+      
+      /* User processes have /user as their root */
+      struct vnode *user_root = NULL;
+      if (vfs_lookup(vfs_get_root(), "/user", &user_root, PROC_UID_ROOT) == 0) {
+          proc->root_vn = user_root;
+          proc->cwd_vn = user_root;
+      }
+  } else {
+      /* PID 1 (Init) is special: it sees the whole physical disk to spawn others */
+      if (proc->pid == 1) {
+          proc->type = PROC_TYPE_ROOT;
+          strncpy(proc->vroot, "/", sizeof(proc->vroot));
+          proc->uid = PROC_UID_ROOT;
+          proc->gid = 0;
+          strncpy(proc->username, "root", 32);
+      } else {
+          proc->type = PROC_TYPE_USER;
+          strncpy(proc->vroot, "/user", sizeof(proc->vroot));
+          proc->uid = PROC_UID_NEXS;
+          proc->gid = 1000;
+          strncpy(proc->username, "nexs", 32);
+      }
   }
 
   /* Add to pool */
@@ -327,8 +325,7 @@ struct process *process_create(const char *name, uint8_t priority,
   proc->page_table = vmm_create_pgd();
 
   pr_info("process_create: '%s' PID=%u slot=%u Prio=%d PageTable=%p\n", name,
-          (uint32_t)proc->pid, (uint32_t)slot, (int)proc->priority,
-          (void *)proc->page_table);
+          (uint32_t)proc->pid, (uint32_t)slot, (int)proc->priority, (void*)proc->page_table);
 
   /* Allocate and Setup Kernel Stack (16KB) */
   void *kstack_base = pmm_alloc_pages(STACK_SIZE / 4096);
@@ -361,13 +358,12 @@ struct process *process_create(const char *name, uint8_t priority,
 
 void smp_create_idle_task(uint32_t cpu_id) {
   extern void idle_task_entry(void);
-
-  if (cpu_id >= MAX_CPUS)
-    return;
+  
+  if (cpu_id >= MAX_CPUS) return;
 
   struct process *idle =
       process_create("idle", PROC_PRIO_IDLE, PROC_PERM_SYSTEM);
-
+  
   if (idle) {
     idle->on_cpu = cpu_id;
 
@@ -395,6 +391,7 @@ void smp_create_idle_task(uint32_t cpu_id) {
     hal_isb();
   }
 }
+
 
 /*
  * Terminate a process and free its resources
@@ -436,13 +433,12 @@ int process_terminate(int pid) {
     proc->wait_queue_ptr = NULL;
     spin_unlock(&wq->lock);
   } else if (proc->state == PROC_READY) {
-    /* CRITICAL: Acquire target CPU's sched_lock before removing from its
-     * runqueue */
+    /* CRITICAL: Acquire target CPU's sched_lock before removing from its runqueue */
     int t_id = (proc->on_cpu >= 0) ? proc->on_cpu : 0;
     struct cpu_info *t_cpu = &cpu_data[t_id];
-
-    /* We already hold the global sched_lock, but we must also hold the per-CPU
-     * lock to prevent races with the scheduler on that CPU. */
+    
+    /* We already hold the global sched_lock, but we must also hold the per-CPU lock 
+     * to prevent races with the scheduler on that CPU. */
     spin_lock(&t_cpu->sched_lock);
     __dequeue_task(proc);
     spin_unlock(&t_cpu->sched_lock);
@@ -487,8 +483,7 @@ int process_terminate(int pid) {
   spin_unlock_irqrestore(&sched_lock, flags);
 
   if (proc->kernel_stack) {
-    pmm_free_pages((void *)(proc->kernel_stack - STACK_SIZE),
-                   STACK_SIZE / 4096);
+    pmm_free_pages((void *)(proc->kernel_stack - STACK_SIZE), STACK_SIZE / 4096);
   }
   if (proc->page_table) {
     vmm_destroy_pgd(proc->page_table);
@@ -506,9 +501,8 @@ void start_user_process(struct process *proc) {
   pr_info("Starting process '%s' PID=%d at 0x%lx\n", proc->name, proc->pid,
           proc->user_entry);
 
-  /* Set current_process via per-CPU structure (CRITICAL FIX) */
-  struct cpu_info *cpu = get_cpu_info();
-  cpu->current_task = proc;
+  /* We don't enqueue the first process, we jump directly to it */
+  current_process = proc;
 
   uint64_t pgd_phys = virt_to_phys(proc->page_table);
   /* Set page table and flush TLB */
@@ -527,8 +521,7 @@ void start_user_process(struct process *proc) {
 struct pt_regs *schedule(struct pt_regs *regs) {
   struct cpu_info *cpu_ptr = get_cpu_info();
   if (!cpu_ptr) {
-    if (regs && pt_regs_pc(regs) == 0)
-      panic("SCHED: [EARLY] pc==0 on return");
+    if (regs && pt_regs_pc(regs) == 0) panic("SCHED: [EARLY] pc==0 on return");
     return regs;
   }
 
@@ -551,8 +544,7 @@ struct pt_regs *schedule(struct pt_regs *regs) {
     spin_unlock_irqrestore(&sched_lock, gflags);
 
     if (to_free->kernel_stack)
-      pmm_free_pages((void *)(to_free->kernel_stack - STACK_SIZE),
-                     STACK_SIZE / 4096);
+      pmm_free_pages((void *)(to_free->kernel_stack - STACK_SIZE), STACK_SIZE / 4096);
     if (to_free->page_table)
       vmm_destroy_pgd(to_free->page_table);
     pmm_free_page(to_free);
@@ -570,53 +562,51 @@ struct pt_regs *schedule(struct pt_regs *regs) {
   extern int compositor_get_focus_pid(void);
   int focus_pid = compositor_get_focus_pid();
 
-  /* 1. Handle Current Process */
-  if (prev) {
-    /* Process died (externally killed or self-exited): defer stack/pgd free */
-    if (prev->state == PROC_DEAD || prev->state == PROC_ZOMBIE) {
-      prev->on_cpu = -1;
-      cpu_ptr->deferred_free_proc = prev;
-      cpu_ptr->current_task = NULL;
-      prev = NULL;
-      goto pick_next;
-    }
+    /* 1. Handle Current Process */
+    if (prev) {
+      /* Process died (externally killed or self-exited): defer stack/pgd free */
+      if (prev->state == PROC_DEAD || prev->state == PROC_ZOMBIE) {
+        prev->on_cpu = -1;
+        cpu_ptr->deferred_free_proc = prev;
+        cpu_ptr->current_task = NULL;
+        prev = NULL;
+        goto pick_next;
+      }
 
-    /* Save current context if it was running */
-    if (regs) {
-      prev->context = regs;
-    }
+      /* Save current context if it was running */
+      if (regs) {
+        prev->context = regs;
+      }
 
-    /* Clear first_run flag since it has now been scheduled and
-     * preempted/yielded */
-    if (prev->first_run) {
-      prev->first_run = 0;
-    }
+      /* Clear first_run flag since it has now been scheduled and preempted/yielded */
+      if (prev->first_run) {
+        prev->first_run = 0;
+      }
 
-    if (prev->state == PROC_RUNNING) {
-      prev->time_slice--;
+      if (prev->state == PROC_RUNNING) {
+        prev->time_slice--;
 
-      if (prev->time_slice <= 0) {
-        /* Quantum Exhausted */
-        prev->time_slice = prev->quantum_reset;
-        prev->state = PROC_READY;
+        if (prev->time_slice <= 0) {
+          /* Quantum Exhausted */
+          prev->time_slice = prev->quantum_reset;
+          prev->state = PROC_READY;
+        } else {
+          /* Preempted or yielded? Mark READY to allow others */
+          prev->state = PROC_READY;
+        }
+      }
+
+      if (prev->state == PROC_READY) {
+        /* Never re-enqueue the CPU-bound idle task. It must stay out of the
+         * runqueue to prevent work-stealing: two CPUs sharing one idle task's
+         * kernel stack causes context corruption (ELR=0 crashes). */
+        if (prev->priority != PROC_PRIO_IDLE) {
+          __enqueue_task(prev);
+        }
       } else {
-        /* Preempted or yielded? Mark READY to allow others */
-        prev->state = PROC_READY;
+        /* Task is sleeping or dying, keep on_cpu to indicate last CPU for affinity or tracking */
       }
     }
-
-    if (prev->state == PROC_READY) {
-      /* Never re-enqueue the CPU-bound idle task. It must stay out of the
-       * runqueue to prevent work-stealing: two CPUs sharing one idle task's
-       * kernel stack causes context corruption (ELR=0 crashes). */
-      if (prev->priority != PROC_PRIO_IDLE) {
-        __enqueue_task(prev);
-      }
-    } else {
-      /* Task is sleeping or dying, keep on_cpu to indicate last CPU for
-       * affinity or tracking */
-    }
-  }
 
 pick_next:;
 
@@ -840,33 +830,33 @@ int kernel_ipc_send(int target_pid, struct ipc_message *msg) {
     return -1;
   }
 
-  /* We must hold target->msg_lock while adding to its queue.
-   * To avoid AB-BA deadlocks with sched_lock, we use trylock or
+  /* We must hold target->msg_lock while adding to its queue. 
+   * To avoid AB-BA deadlocks with sched_lock, we use trylock or 
    * we ensure a fixed order: sched_lock -> target->msg_lock.
    */
   spin_lock(&target->msg_lock);
   list_add_tail(&node->list, &target->msg_queue);
-
+  
   /* Check if target is waiting */
   if (target->state == PROC_SLEEPING &&
       (target->ipc_target_pid == -1 ||
        target->ipc_target_pid == (int)msg->from)) {
-
+    
     /* Wake target: transition state while holding sched_lock is safe */
     target->state = PROC_READY;
-
+    
     /* To enqueue, we need target CPU's sched_lock */
     int t_id = (target->on_cpu >= 0) ? target->on_cpu : 0;
     struct cpu_info *target_cpu = &cpu_data[t_id];
-
+    
     spin_lock(&target_cpu->sched_lock);
     __enqueue_task(target);
     spin_unlock(&target_cpu->sched_lock);
   }
-
+  
   spin_unlock(&target->msg_lock);
   spin_unlock_irqrestore(&sched_lock, flags);
-
+  
   return 0;
 }
 
@@ -883,8 +873,7 @@ int sys_ipc_recv(int src_pid, void *msg_ptr) {
   /* 1. Try to pop an existing message */
   struct ipc_node *node = pop_message(current_process, src_pid);
   if (node) {
-    if (vmm_copy_to_user(msg_ptr, &node->msg, sizeof(struct ipc_message)) !=
-        0) {
+    if (vmm_copy_to_user(msg_ptr, &node->msg, sizeof(struct ipc_message)) != 0) {
       /* Drop node and return error */
       kfree(node);
       return -1;
@@ -911,8 +900,7 @@ int sys_ipc_recv(int src_pid, void *msg_ptr) {
 int sys_ipc_try_recv(int src_pid, void *msg_ptr) {
   struct ipc_node *node = pop_message(current_process, src_pid);
   if (node) {
-    if (vmm_copy_to_user(msg_ptr, &node->msg, sizeof(struct ipc_message)) !=
-        0) {
+    if (vmm_copy_to_user(msg_ptr, &node->msg, sizeof(struct ipc_message)) != 0) {
       kfree(node);
       return -1;
     }

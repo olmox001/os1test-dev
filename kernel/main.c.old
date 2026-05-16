@@ -7,6 +7,7 @@
 #include <drivers/virtio_blk.h>
 #include <drivers/virtio_gpu.h>
 #include <kernel/arch.h>
+#include <kernel/vfs/vnode.h>
 #include <kernel/buffer.h>
 #include <kernel/cpu.h>
 #include <kernel/drivers.h>
@@ -14,7 +15,6 @@
 #include <kernel/fdt.h>
 #include <kernel/gpt.h>
 #include <kernel/graphics.h>
-#include <kernel/hal.h>
 #include <kernel/irq.h>
 #include <kernel/platform.h>
 #include <kernel/pmm.h>
@@ -24,8 +24,9 @@
 #include <kernel/string.h>
 #include <kernel/test.h>
 #include <kernel/types.h>
-#include <kernel/vfs/vnode.h>
 #include <kernel/vmm.h>
+#include <kernel/hal.h>
+
 /* Version */
 #define KERNEL_VERSION_MAJOR 0
 #define KERNEL_VERSION_MINOR 1
@@ -60,8 +61,7 @@ extern void timer_init_percpu(void);
 /* Kernel entry point - receives multiboot info pointer from bootloader */
 #ifdef ARCH_AMD64
 void kernel_main(uint64_t magic, uint64_t mbi_ptr) {
-  (void)magic;
-  (void)mbi_ptr;
+  (void)magic; (void)mbi_ptr;
   extern struct cpu_info cpu_data[MAX_CPUS];
   cpu_data[0].self = &cpu_data[0];
 #else
@@ -79,6 +79,7 @@ void kernel_main(uint64_t x0_arg) {
   boot_fdt_ptr = 0;
   fdt_init(0);
 #endif
+
 
   /* Print kernel banner */
   print_banner();
@@ -160,7 +161,7 @@ static void init_memory(void) {
   /* Initialize physical memory manager with architecture-detected regions */
   size_t count = 0;
   struct mem_region *regions = arch_platform_get_mem_regions(&count);
-
+  
   pmm_early_init(regions, count);
   pmm_init(regions, count);
 
@@ -192,8 +193,7 @@ static void init_memory(void) {
   pr_info("%s", "Buffer: Done.\n");
 
   /* Initialize VFS layer (cache, vnode hash, ext4) */
-  extern void vfs_init(void);
-  // vfs_init();
+  vfs_init();
   pr_info("%s", "VFS: Done.\n");
 
   /* Initialize System Registry */
@@ -221,7 +221,7 @@ static void init_scheduler(void) {
   pr_info("%s", "Scheduler: Spawning First-Stage Init...\n");
 
   extern struct vnode *vfs_get_root(void);
-  extern int vfs_lookup(struct vnode * start_vp, const char *path,
+  extern int vfs_lookup(struct vnode *start_vp, const char *path,
                         struct vnode **vpp, uid_t uid);
 
   /* disk + vfs were initialized in init_memory(); try lookup immediately */
@@ -248,8 +248,7 @@ static void init_scheduler(void) {
   if (!init_vn)
     panic("No disk with userland found after 30 retries");
 
-  struct process *init =
-      process_create("init", PROC_PRIO_ROOT, PROC_PERM_SYSTEM);
+  struct process *init = process_create("init", PROC_PRIO_ROOT, PROC_PERM_SYSTEM);
   if (init && process_load_elf(init, init_vn) == 0) {
     pr_info("Scheduler: Initialized PID %d (/sys/bin/init)\n", init->pid);
     enqueue_task(init);
@@ -274,7 +273,7 @@ void kernel_secondary_main(void) {
 
   /* Enable interrupts */
   local_irq_enable();
-
+  
   hal_wmb(); /* Ensure all local init is visible before ack */
 
   /* Acknowledge boot to primary core */

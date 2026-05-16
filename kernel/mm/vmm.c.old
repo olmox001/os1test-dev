@@ -6,13 +6,13 @@
  */
 #include <kernel/arch.h>
 #include <kernel/cpu.h>
-#include <kernel/platform.h>
 #include <kernel/pmm.h>
 #include <kernel/printk.h>
 #include <kernel/sched.h>
 #include <kernel/string.h>
 #include <kernel/types.h>
 #include <kernel/vmm.h>
+#include <kernel/platform.h>
 #include <stdint.h>
 
 /* Page Table Levels */
@@ -61,6 +61,8 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc) {
   // Physical address IS the pointer returned by pmm (since we are 1:1 mapped
   // currently) But table entries store PHYSICAL addresses.
 
+
+
   /* Zero and Flush the new table page */
   memset(page, 0, 4096);
   arch_cache_clean_range(page, 4096);
@@ -90,8 +92,7 @@ int vmm_map_page(uint64_t *pgd, uint64_t virt, uint64_t phys, uint64_t flags) {
   }
 
   /* Extract existing mapping for warning if necessary */
-  /* (Optional: we can keep the warning logic here if arch_vmm_map doesn't warn)
-   */
+  /* (Optional: we can keep the warning logic here if arch_vmm_map doesn't warn) */
 
   return arch_vmm_map((uint64_t)pgd, virt, phys, flags);
 }
@@ -197,7 +198,7 @@ void vmm_init(void) {
   /* 1. Map RAM with correct permissions (Bootstrap 128MB) */
   uint64_t ram_start = ARCH_RAM_START;
   uint64_t ram_size = 128UL * 1024 * 1024; /* Enough to boot */
-
+  
   vmm_map(kernel_pgd, ram_start, ram_start, ram_size, PAGE_KERNEL_EXEC);
 
   /* 2. Map MMIO */
@@ -217,8 +218,7 @@ void vmm_dynamic_remap(void) {
 
   /* Allocate a temporary PGD to build the new map */
   uint64_t *new_pgd = pmm_alloc_page();
-  if (!new_pgd)
-    panic("VMM: Failed to allocate new dynamic PGD");
+  if (!new_pgd) panic("VMM: Failed to allocate new dynamic PGD");
   memset(new_pgd, 0, 4096);
 
   /* 1. Map all discovered memory regions */
@@ -226,13 +226,12 @@ void vmm_dynamic_remap(void) {
   struct mem_region *regions = arch_platform_get_mem_regions(&count);
   for (size_t i = 0; i < count; i++) {
     if (regions[i].type == MEM_REGION_USABLE) {
-      pr_info("VMM: Mapping region 0x%lx - 0x%lx\n", regions[i].base,
-              regions[i].base + regions[i].size);
-
-      /* Use the optimized arch_vmm_map_range which supports 2MB pages
-       * (Zero-Copy Table Linking) Now safe as get_next_table handles
-       * block-splitting. */
-      arch_vmm_map_range((uint64_t)new_pgd, regions[i].base, regions[i].base,
+      pr_info("VMM: Mapping region 0x%lx - 0x%lx\n", 
+              regions[i].base, regions[i].base + regions[i].size);
+      
+      /* Use the optimized arch_vmm_map_range which supports 2MB pages (Zero-Copy Table Linking)
+       * Now safe as get_next_table handles block-splitting. */
+      arch_vmm_map_range((uint64_t)new_pgd, regions[i].base, regions[i].base, 
                          regions[i].size, PAGE_KERNEL_EXEC);
     }
   }
@@ -242,11 +241,11 @@ void vmm_dynamic_remap(void) {
 
   /* 3. Atomically switch to the new PGD */
   uint64_t new_phys = virt_to_phys(new_pgd);
-
+  
   /* Swap the global kernel_pgd */
   uint64_t *old_pgd = kernel_pgd;
   kernel_pgd = new_pgd;
-
+  
   /* Update secondary boot PGD for CPUs that haven't started yet */
   arch_vmm_set_secondary_pgd(new_phys);
 
@@ -254,15 +253,13 @@ void vmm_dynamic_remap(void) {
   arch_mb();
   arch_isb();
 
-  /* 4. Cleanup old table - currently deferred until all CPUs have switched to
-   * new PGD */
-  /* TODO: Implement proper synchronization (IPI broadcast) to safely free
-   * old_pgd after all secondary CPUs have transitioned to the new kernel_pgd.
+  /* 4. Cleanup old table - currently deferred until all CPUs have switched to new PGD */
+  /* TODO: Implement proper synchronization (IPI broadcast) to safely free old_pgd
+   *       after all secondary CPUs have transitioned to the new kernel_pgd.
    *       This requires arch_send_ipi and a TLB flush callback on all CPUs. */
   (void)old_pgd;
 
-  pr_info("%s", "VMM: Dynamic remapping successful. All discovered RAM is now "
-                "accessible.\n");
+  pr_info("%s", "VMM: Dynamic remapping successful. All discovered RAM is now accessible.\n");
 }
 
 /*

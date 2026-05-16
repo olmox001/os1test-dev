@@ -141,10 +141,10 @@ KERN_C_SOURCES = \
     $(ARCH_DIR)/platform.c \
     $(ARCH_DIR)/hal.c \
     $(ARCH_DIR)/virtio.c \
-    $(ARCH_DIR)/pci.c \
     $(KERNEL_DIR)/drivers/uart/pl011.c \
     $(KERNEL_DIR)/drivers/gic/gic.c \
-    $(KERNEL_DIR)/drivers/timer/timer.c
+    $(KERNEL_DIR)/drivers/timer/timer.c \
+    $(ARCH_DIR)/pci.c
 endif
 
 KERN_C_SOURCES += \

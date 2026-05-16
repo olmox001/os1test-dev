@@ -243,11 +243,9 @@ int compositor_create_window(int x, int y, int w, int h, const char *title,
     buffer[i] = windows[slot].bg_color;
   }
 
-  /* Protect windows of system/root processes (shell, init) from accidental
-   * close */
+  /* Protect windows of system/root processes (shell, init) from accidental close */
   windows[slot].protected =
-      (current_process->permissions & (PROC_PERM_SYSTEM | PROC_PERM_ROOT)) ? 1
-                                                                           : 0;
+      (current_process->permissions & (PROC_PERM_SYSTEM | PROC_PERM_ROOT)) ? 1 : 0;
   windows[slot].top_most = 0;
 
   window_count++;
@@ -924,8 +922,7 @@ static void compositor_render_internal(void) {
     region_destroy(bg_region);
   }
   region_destroy(occluded);
-  occluded = NULL; /* prevent double-free: cleanup at end of function also calls
-                      region_destroy(occluded) */
+  occluded = NULL; /* prevent double-free: cleanup at end of function also calls region_destroy(occluded) */
 
   /* Pass 2: Rendering (Bottom-Up) - Painter's Algorithm with Clipping */
   for (int i = 0; i < count && i < MAX_WINDOWS; i++) {
@@ -1002,8 +999,7 @@ static void compositor_render_internal(void) {
       int char_h = graphics_font_height();
       int text_w = graphics_string_width(win->title);
       int start_x = win->x + (win->width - text_w) / 2;
-      int start_y =
-          decor_y + (20 - char_h) / 2; /* Center vertically in title bar */
+      int start_y = decor_y + (20 - char_h) / 2; /* Center vertically in title bar */
 
       gl_draw_string(&screen, start_x, start_y, win->title, 0xFFFFFFFF);
     }

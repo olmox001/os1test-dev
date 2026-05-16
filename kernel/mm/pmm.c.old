@@ -12,10 +12,8 @@
 void pmm_init_region(uint64_t base, uint64_t size);
 
 void pmm_init_region(uint64_t base, uint64_t size) {
-  /* Mark pages in this region as usable (they are already 0 in bitmap if
-   * zone_init was called) */
-  /* This is a placeholder; real implementation would manage multiple regions.
-   */
+  /* Mark pages in this region as usable (they are already 0 in bitmap if zone_init was called) */
+  /* This is a placeholder; real implementation would manage multiple regions. */
   pr_info("PMM: Region added 0x%lx - 0x%lx\n", base, base + size);
 }
 
@@ -116,8 +114,7 @@ void pmm_early_init(struct mem_region *regions, size_t count) {
     for (size_t i = 0; i < count; i++) {
       if (regions[i].type == MEM_REGION_USABLE) {
         uint64_t end = regions[i].base + regions[i].size;
-        if (end > max_detected)
-          max_detected = end;
+        if (end > max_detected) max_detected = end;
       }
     }
   } else {
@@ -130,7 +127,7 @@ void pmm_early_init(struct mem_region *regions, size_t count) {
   if (max_detected > MEMORY_BASE + (256UL << 30)) {
     max_detected = MEMORY_BASE + (256UL << 30);
   }
-
+  
   mem_end = max_detected;
   total_pages = (mem_end - MEMORY_BASE) / PAGE_SIZE;
 
@@ -139,20 +136,17 @@ void pmm_early_init(struct mem_region *regions, size_t count) {
   uint64_t dma_end_pfn = phys_to_pfn(DMA_ZONE_END - MEMORY_BASE);
   size_t dma_bitmap_size = (dma_end_pfn + 63) / 64 * 8;
   size_t normal_bitmap_size = (total_pages - dma_end_pfn + 63) / 64 * 8;
-  size_t total_metadata_size =
-      PAGE_ALIGN(page_array_size + dma_bitmap_size + normal_bitmap_size);
+  size_t total_metadata_size = PAGE_ALIGN(page_array_size + dma_bitmap_size + normal_bitmap_size);
 
   /* 3. Find a place for metadata (must be in the first usable region) */
   uintptr_t metadata_phys = 0;
   for (size_t i = 0; i < count; i++) {
-    if (regions[i].type == MEM_REGION_USABLE &&
-        regions[i].size >= total_metadata_size) {
+    if (regions[i].type == MEM_REGION_USABLE && regions[i].size >= total_metadata_size) {
       extern char __kernel_end[];
       uint64_t kernel_limit = PAGE_ALIGN((uintptr_t)__kernel_end);
       uint64_t target = regions[i].base;
-      if (target < kernel_limit)
-        target = kernel_limit;
-
+      if (target < kernel_limit) target = kernel_limit;
+      
       if (target + total_metadata_size <= regions[i].base + regions[i].size) {
         metadata_phys = target;
         break;
@@ -161,8 +155,7 @@ void pmm_early_init(struct mem_region *regions, size_t count) {
   }
 
   if (!metadata_phys) {
-    panic("PMM: Failed to allocate metadata area (%lu KB needed)",
-          total_metadata_size / 1024);
+    panic("PMM: Failed to allocate metadata area (%lu KB needed)", total_metadata_size / 1024);
   }
 
   /* 4. Map pointers */
@@ -172,21 +165,17 @@ void pmm_early_init(struct mem_region *regions, size_t count) {
 
   /* 5. Zero out metadata */
   memset((void *)metadata_phys, 0, total_metadata_size);
-
-  pr_info("PMM: Metadata initialized at 0x%lx (%lu KB)\n", metadata_phys,
-          total_metadata_size / 1024);
-  pr_info("PMM: Total detected RAM: %lu MB\n",
-          (mem_end - MEMORY_BASE) / (1024 * 1024));
+  
+  pr_info("PMM: Metadata initialized at 0x%lx (%lu KB)\n", metadata_phys, total_metadata_size / 1024);
+  pr_info("PMM: Total detected RAM: %lu MB\n", (mem_end - MEMORY_BASE) / (1024 * 1024));
 }
 
 /* Helper to reserve a range */
 static void pmm_reserve_range(uint64_t start_pfn, uint64_t end_pfn) {
   for (uint64_t pfn = start_pfn; pfn < end_pfn; pfn++) {
-    if (pfn >= total_pages)
-      break;
+    if (pfn >= total_pages) break;
     struct page *pg = &page_array[pfn];
-    if (pg->flags & PG_RESERVED)
-      continue;
+    if (pg->flags & PG_RESERVED) continue;
 
     pg->flags = PG_RESERVED | PG_KERNEL;
     pg->refcount = 1;
@@ -207,8 +196,7 @@ static void pmm_reserve_range(uint64_t start_pfn, uint64_t end_pfn) {
  * Initialize PMM with memory regions
  */
 void pmm_init(struct mem_region *regions, size_t count) {
-  /* If early_init wasn't called, we are in trouble, but let's try to handle it
-   */
+  /* If early_init wasn't called, we are in trouble, but let's try to handle it */
   if (!page_array) {
     pmm_early_init(regions, count);
   }
@@ -218,28 +206,21 @@ void pmm_init(struct mem_region *regions, size_t count) {
 
   /* Initialize zones with our dynamic bitmaps */
   zone_init(&zones[ZONE_DMA], "DMA", 0, dma_end_pfn, dma_bitmap);
-  zone_init(&zones[ZONE_NORMAL], "Normal", dma_end_pfn, normal_end_pfn,
-            normal_bitmap);
+  zone_init(&zones[ZONE_NORMAL], "Normal", dma_end_pfn, normal_end_pfn, normal_bitmap);
 
   free_pages = zones[ZONE_DMA].free_pages + zones[ZONE_NORMAL].free_pages;
 
   /* Mark kernel pages as reserved */
   extern char __kernel_start[], __kernel_end[];
-  uint64_t kernel_start_pfn =
-      phys_to_pfn((uint64_t)__kernel_start - MEMORY_BASE);
-  uint64_t kernel_end_pfn =
-      phys_to_pfn(PAGE_ALIGN((uint64_t)__kernel_end) - MEMORY_BASE);
+  uint64_t kernel_start_pfn = phys_to_pfn((uint64_t)__kernel_start - MEMORY_BASE);
+  uint64_t kernel_end_pfn = phys_to_pfn(PAGE_ALIGN((uint64_t)__kernel_end) - MEMORY_BASE);
 
   /* Also reserve the metadata itself! */
-  uint64_t metadata_start_pfn =
-      phys_to_pfn((uintptr_t)page_array - MEMORY_BASE);
+  uint64_t metadata_start_pfn = phys_to_pfn((uintptr_t)page_array - MEMORY_BASE);
   size_t page_array_size = total_pages * sizeof(struct page);
   size_t dma_bitmap_size = (dma_end_pfn + 63) / 64 * 8;
   size_t normal_bitmap_size = (total_pages - dma_end_pfn + 63) / 64 * 8;
-  uint64_t metadata_end_pfn =
-      phys_to_pfn(PAGE_ALIGN((uintptr_t)page_array + page_array_size +
-                             dma_bitmap_size + normal_bitmap_size) -
-                  MEMORY_BASE);
+  uint64_t metadata_end_pfn = phys_to_pfn(PAGE_ALIGN((uintptr_t)page_array + page_array_size + dma_bitmap_size + normal_bitmap_size) - MEMORY_BASE);
 
   pmm_reserve_range(kernel_start_pfn, kernel_end_pfn);
   pmm_reserve_range(metadata_start_pfn, metadata_end_pfn);
@@ -247,15 +228,14 @@ void pmm_init(struct mem_region *regions, size_t count) {
   /* Mark other reserved regions from bootloader */
   for (size_t i = 0; i < count; i++) {
     if (regions[i].type != MEM_REGION_USABLE) {
-      uint64_t start = phys_to_pfn(regions[i].base - MEMORY_BASE);
-      uint64_t end = phys_to_pfn(PAGE_ALIGN(regions[i].base + regions[i].size) -
-                                 MEMORY_BASE);
-      pmm_reserve_range(start, end);
+        uint64_t start = phys_to_pfn(regions[i].base - MEMORY_BASE);
+        uint64_t end = phys_to_pfn(PAGE_ALIGN(regions[i].base + regions[i].size) - MEMORY_BASE);
+        pmm_reserve_range(start, end);
     }
   }
 
 #ifdef ARCH_AMD64
-  /*
+  /* 
    * Strict reservation of the first 1MB on AMD64.
    * Protects SMP trampoline (0x1000), BIOS data, and Multiboot headers.
    */

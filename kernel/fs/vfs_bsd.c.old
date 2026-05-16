@@ -4,12 +4,12 @@
  * Full vnode lifecycle and mount management live in kernel/fs/vfs/.
  */
 #include <kernel/cpu.h>
-#include <kernel/printk.h>
 #include <kernel/sched.h>
 #include <kernel/string.h>
 #include <kernel/vfs/mount.h>
 #include <kernel/vfs/namei.h>
 #include <kernel/vfs/vnode.h>
+#include <kernel/printk.h>
 
 /*
  * vfs_lookup: walk a path component-by-component starting from start_vp.
@@ -28,8 +28,8 @@ int vfs_lookup(struct vnode *start_vp, const char *path, struct vnode **vpp,
   if (cur) {
     spin_lock_irqsave(&cur->vfs_lock, &lock_flags);
     locked = true;
-    pr_debug("[C%d P%d %s] VFS: lookup %s\n", (int)hal_cpu_id(), cur->pid,
-             cur->name, path);
+    pr_info("[C%d P%d %s] [TRACE] VFS: lookup %s\n", (int)hal_cpu_id(),
+            cur->pid, cur->name, path);
   }
 
   struct vnode *current_vp = start_vp;
@@ -113,7 +113,7 @@ int vfs_read(struct vnode *vp, void *buf, size_t len, off_t *off) {
   if (cur) {
     spin_lock_irqsave(&cur->vfs_lock, &lock_flags);
     locked = true;
-    pr_debug("[C%d P%d %s] VFS: read %d bytes at off %ld\n", (int)hal_cpu_id(),
+    pr_info("[C%d P%d %s] [TRACE] VFS: read %d bytes at off %ld\n", (int)hal_cpu_id(),
              cur->pid, cur->name, (int)len, *off);
   }
 
@@ -138,7 +138,7 @@ int vfs_write(struct vnode *vp, const void *buf, size_t len, off_t *off) {
   if (cur) {
     spin_lock_irqsave(&cur->vfs_lock, &lock_flags);
     locked = true;
-    pr_debug("[C%d P%d %s] VFS: write %d bytes at off %ld\n", (int)hal_cpu_id(),
+    pr_info("[C%d P%d %s] [TRACE] VFS: write %d bytes at off %ld\n", (int)hal_cpu_id(),
              cur->pid, cur->name, (int)len, *off);
   }
 
@@ -163,8 +163,8 @@ int vfs_readdir(struct vnode *vp, void *buf, size_t len, off_t *off) {
   if (cur) {
     spin_lock_irqsave(&cur->vfs_lock, &lock_flags);
     locked = true;
-    pr_debug("[C%d P%d %s] VFS: readdir %d bytes\n", (int)hal_cpu_id(),
-             cur->pid, cur->name, (int)len);
+    pr_info("[C%d P%d %s] [TRACE] VFS: readdir %d bytes\n", (int)hal_cpu_id(),
+            cur->pid, cur->name, (int)len);
   }
 
   if (!vp->v_op->vop_readdir) {

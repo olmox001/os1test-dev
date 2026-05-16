@@ -18,6 +18,7 @@
 static struct registry_entry registry_store[MAX_REGISTRY_KEYS];
 static int registry_count = 0;
 static DEFINE_SPINLOCK(registry_lock);
+static int registry_init_done = 0;  /* Track if kernel-side init completed */
 
 void registry_init(void) {
   memset(registry_store, 0, sizeof(registry_store));
@@ -28,6 +29,7 @@ void registry_init(void) {
   registry_set("system.hostname", "NeXs");
   registry_set("mouse.sensitivity", "1.0");
 
+  registry_init_done = 1;  /* Mark init complete for syscall guards */
   pr_info("Registry: Initialized with %d default keys.\n", registry_count);
 }
 
@@ -91,21 +93,37 @@ int registry_get(const char *key, char *buffer, size_t size) {
 /*
  * Syscall Interface
  * op: 0 = READ, 1 = WRITE
+ * 
+ * Defensive: Handle early-boot calls where current_process might be NULL
  */
 long sys_registry(int op, const char *key, char *value, size_t size) {
   char k_key[MAX_KEY_LEN];
   char k_val[MAX_VAL_LEN];
 
+  /* Defensive check: Ensure registry is initialized before accepting syscalls */
+  if (!registry_init_done) {
+    pr_warn("%s", "sys_registry: Registry not yet initialized, rejecting syscall\n");
+    return -11; /* EAGAIN equivalent */
+  }
+
+  /* Defensive check: Ensure current_process and page_table are valid */
+  struct process *curr = current_process;
+  if (!curr || !curr->page_table) {
+    pr_warn("sys_registry: Early boot detected (current_process=%p), retrying...\n",
+            (void *)curr);
+    return -11; /* EAGAIN: Caller should retry */
+  }
+
   /* 1. Copy Key from User Space securely (stops at null!) */
   if (vmm_copy_string_from_user(k_key, key, MAX_KEY_LEN) != 0) {
-    pr_err("%s", "sys_registry: Invalid key pointer\n");
+    pr_err("sys_registry: Invalid key pointer (addr=0x%lx)\n", (uint64_t)key);
     return -1;
   }
 
   if (op == REG_OP_WRITE) {
     /* 2. Copy Value from User Space securely (stops at null!) */
     if (vmm_copy_string_from_user(k_val, value, MAX_VAL_LEN) != 0) {
-      pr_err("%s", "sys_registry: Invalid value pointer\n");
+      pr_err("sys_registry: Invalid value pointer (addr=0x%lx)\n", (uint64_t)value);
       return -1;
     }
     return registry_set(k_key, k_val);
@@ -117,7 +135,8 @@ long sys_registry(int op, const char *key, char *value, size_t size) {
         copy_len = size;
 
       if (vmm_copy_to_user(value, k_val, copy_len) != 0) {
-        pr_err("%s", "sys_registry: Failed to copy back to user\n");
+        pr_err("sys_registry: Failed to copy back to user (addr=0x%lx)\n",
+               (uint64_t)value);
         return -1;
       }
       return 0;

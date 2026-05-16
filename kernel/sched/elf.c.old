@@ -15,14 +15,12 @@
 #include <kernel/vfs_bsd.h>
 
 int process_load_elf(struct process *proc, struct vnode *vn) {
-  if (!vn)
-    return -1;
+  if (!vn) return -1;
 
   /* 1. Read ELF Header */
   Elf64_Ehdr ehdr;
   off_t off = 0;
-  if (vfs_read(vn, (uint8_t *)&ehdr, sizeof(ehdr), &off) != 0 ||
-      off != (off_t)sizeof(ehdr)) {
+  if (vfs_read(vn, (uint8_t *)&ehdr, sizeof(ehdr), &off) != 0 || off != (off_t)sizeof(ehdr)) {
     pr_err("%s", "ELF: Failed to read header\n");
     return -1;
   }
@@ -30,7 +28,7 @@ int process_load_elf(struct process *proc, struct vnode *vn) {
   /* 2. Verify Header */
   if (memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0 ||
       ehdr.e_ident[EI_CLASS] != ELFCLASS64 || ehdr.e_machine != ARCH_TYPE) {
-    pr_err("ELF: Invalid format (Machine: 0x%x, Expected: 0x%x)\n",
+    pr_err("ELF: Invalid format (Machine: 0x%x, Expected: 0x%x)\n", 
            ehdr.e_machine, ARCH_TYPE);
     return -1;
   }
