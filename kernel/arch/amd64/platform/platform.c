@@ -272,10 +272,10 @@ int arch_cpu_wake_secondary(uint64_t cpu_id, void (*entry)(void), void *stack) {
   /* 3. Send INIT IPI */
   lapic_send_ipi(cpu_id, ICR_INIT | ICR_ASSERT | ICR_LEVEL | ICR_PHYSICAL);
 
-  /* 4. Wait 10ms */
+  /* 4. Wait 10ms (Intel spec: INIT de-assert delay) */
   udelay(10000);
 
-  /* 5. Send STARTUP IPI (Vector 0x01 -> 0x1000) */
+  /* 5. Send first STARTUP IPI (Vector 0x01 -> 0x1000) */
   lapic_send_ipi(cpu_id, ICR_STARTUP | 0x01 | ICR_PHYSICAL);
 
   pr_info("AMD64: Sent INIT-SIPI to CPU %lu\n", cpu_id);
@@ -328,6 +328,8 @@ void arch_smp_init(void) {
   for (uint32_t i = 1; i < cpu_count; i++) {
     if (i == bsp_id)
       continue;
+    if (cpu_data[i].online)
+      continue; /* already initialized — don't re-send INIT IPI */
 
     cpu_boot_ack = 0;
 
@@ -335,10 +337,16 @@ void arch_smp_init(void) {
     void *stack_bottom = arch_get_kernel_stack(i);
     void *stack_top = (void *)((uintptr_t)stack_bottom + 131072);
 
-    /* Invia sequenza di wake-up (INIT-SIPI-SIPI) al Local APIC ID 'i' */
     if (arch_cpu_wake_secondary(i, secondary_cpu_entry, stack_top) == 0) {
 
-      /* Attesa dell'ACK dal core secondario con timeout */
+      /* No second SIPI: the AP needs to execute from the trampoline through
+       * cpu_init() before it writes cpu_boot_ack, which takes far longer than
+       * the 200 µs intel spec gap (designed for hardware that drops SIPIs, not
+       * for checking kernel init completion).  A second SIPI at 200 µs would
+       * restart the AP from the trampoline while it is already running, causing
+       * double GDT/IDT init and corrupting register state. */
+
+      /* Wait for ACK from secondary core with timeout */
       int timeout = 10000;
       while (cpu_boot_ack != i && timeout > 0) {
         udelay(1000);

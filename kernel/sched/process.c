@@ -14,6 +14,8 @@
 #include <kernel/vmm.h>
 #include <stdint.h>
 
+extern uint32_t nr_cpus;
+
 /* Process pool - slots can be NULL if process terminated */
 struct process *process_pool[MAX_PROCESSES];
 static int active_count = 0; /* Number of active processes */
@@ -126,7 +128,9 @@ void wake_up(struct wait_queue_head *wq) {
     uint64_t global_flags;
     spin_lock_irqsave(&sched_lock, &global_flags);
     p->on_cpu = rr_cpu;
-    rr_cpu = (rr_cpu + 1) % MAX_CPUS;
+    int online = (int)nr_cpus;
+    if (online < 1) online = 1;
+    rr_cpu = (rr_cpu + 1) % online;
     spin_unlock_irqrestore(&sched_lock, global_flags);
   }
 
@@ -393,6 +397,12 @@ void smp_create_idle_task(uint32_t cpu_id) {
     hal_cache_clean(idle->context, sizeof(struct pt_regs));
     hal_mb();
     hal_isb();
+
+    /* Signal AP that idle_task is ready; AP polls this before starting its
+     * LAPIC timer, eliminating the window where schedule() runs with a NULL
+     * idle_task. The mfence above ensures idle_task is visible first. */
+    info->timer_ready = 1;
+    hal_wmb();
   }
 }
 

@@ -190,10 +190,6 @@ _start_64:
 .global secondary_cpu_entry
 secondary_cpu_entry:
     cli
-    /* Debug: Print 'S' */
-    movw $0x3f8, %dx
-    movb $'S', %al
-    outb %al, %dx
 
     /* Setup segments for 64-bit mode */
     xorl %eax, %eax
@@ -204,7 +200,9 @@ secondary_cpu_entry:
     movw $0x10, %ax
     movw %ax, %ss
 
-    call arch_cpu_init
+    /* kernel_secondary_main calls cpu_init() which calls arch_cpu_init().
+     * Do NOT call arch_cpu_init here — that would run it twice and corrupt
+     * per-CPU state (double GDT/IDT load, double LAPIC init, stale in_printk). */
     call kernel_secondary_main
 
 .global arch_yield

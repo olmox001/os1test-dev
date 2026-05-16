@@ -32,6 +32,9 @@ struct cpu_info {
 
   /* Deferred process free: freed on next schedule() call after context switch */
   struct process *deferred_free_proc;
+
+  /* BSP sets this after idle_task is ready; AP waits before starting its timer */
+  volatile uint8_t timer_ready;
 };
 #endif
 

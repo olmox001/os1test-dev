@@ -270,17 +270,29 @@ void kernel_secondary_main(void) {
   /* Initialize per-CPU state */
   cpu_init();
   irq_init_percpu();
-  timer_init_percpu();
+  /* Do NOT start the LAPIC timer yet — idle_task doesn't exist until the BSP
+   * calls smp_create_idle_task(), which sets cpu_info::timer_ready. Starting
+   * the timer here races schedule() against a NULL idle_task. */
 
-  /* Enable interrupts */
+  /* Acknowledge boot to primary core before enabling IRQs.  If IRQs were
+   * enabled first, the BSP's 200 µs second-SIPI guard could fire before we
+   * write cpu_boot_ack, restarting this AP from the trampoline mid-init. */
+  cpu_boot_ack = cpu;
+  hal_wmb(); /* Ensure ACK is visible to BSP before we enable IRQs */
+
   local_irq_enable();
 
-  hal_wmb(); /* Ensure all local init is visible before ack */
+  /* Wait for BSP to finish creating the idle task before starting the timer.
+   * BSP sets timer_ready inside smp_create_idle_task() after a full mfence,
+   * so idle_task is guaranteed visible once we exit this loop. */
+  struct cpu_info *my_cpu = get_cpu_info();
+  while (!my_cpu->timer_ready) {
+    hal_cpu_yield();
+  }
+  hal_rmb(); /* Ensure idle_task store is visible before schedule() reads it */
 
-  /* Acknowledge boot to primary core */
-  cpu_boot_ack = cpu;
-
-  // pr_info("Secondary CPU %u online and ready\n", cpu);
+  /* Now safe to start the LAPIC timer — idle_task is committed */
+  timer_init_percpu();
 
   /* Enter idle loop - scheduler will preempt this */
   while (1) {

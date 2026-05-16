@@ -6,9 +6,6 @@
 uint32_t ticks_per_ms = 0;
 
 void lapic_init(void) {
-    /* Debug: Print 'L' using %dx for 16-bit port */
-    __asm__ __volatile__("movw $0x3f8, %%dx; movb $'L', %%al; outb %%al, %%dx" ::: "ax", "dx");
-
     /* Ensure APIC is enabled in MSR */
     uint64_t apic_msr = rdmsr(0x1B); /* IA32_APIC_BASE */
     if (!(apic_msr & 0x800)) {
