@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 
+extern int key_fire;
+
 static int s_window = -1;
 
 void DG_Init() {
@@ -54,8 +56,8 @@ int DG_GetKey(int* pressed, unsigned char* key) {
             /* Enhanced Key Mapping for Doom */
             if (c == '\n' || c == '\r') {
                 *key = 0x0D; /* KEY_ENTER */
-            } else if (c == 27) {
-                *key = 0x1B; /* KEY_ESCAPE */
+            } else if (c == 27 || c == 'x' || c == 'X') {
+                *key = 0x1B; /* KEY_ESCAPE - Ora si attiva sia con ESC che con X */
             } else if (c == '\b' || c == 127) {
                 *key = 0x08; /* KEY_BACKSPACE */
             } else if (c == ' ') {
@@ -68,6 +70,8 @@ int DG_GetKey(int* pressed, unsigned char* key) {
                 *key = 0xac; /* KEY_LEFTARROW */
             } else if (c == 'd' || c == 'D') {
                 *key = 0xae; /* KEY_RIGHTARROW */
+            } else if (c == 'e' || c == 'E') {
+                *key = key_fire;
             } else {
                 *key = c;
             }
@@ -76,9 +80,7 @@ int DG_GetKey(int* pressed, unsigned char* key) {
             /* We can handle mouse buttons here if needed */
             if (event.mouse.button == 1) { // Left click
                 *pressed = event.mouse.state;
-                *key = 0x9d; // KEY_FIRE (mapped to Ctrl or similar in some engines, but let's use a placeholder)
-                // DoomGeneric usually expects keyboard keys for fire. 
-                // We'll map left click to 'fire' if it's a press.
+                *key = key_fire;
                 return 1;
             }
         }

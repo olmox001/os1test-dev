@@ -70,9 +70,10 @@ void arch_cpu_init(void) {
 }
 
 struct cpu_info *get_cpu_info(void) {
-  uint32_t id = arch_get_cpu_id();
-  if (id >= MAX_CPUS) return &cpu_data[0];
-  return &cpu_data[id];
+  struct cpu_info *cpu_ptr;
+  /* Use GS segment base for atomic per-CPU access on AMD64 */
+  __asm__ __volatile__("movq %%gs:0, %0" : "=r"(cpu_ptr));
+  return cpu_ptr;
 }
 
 void arch_cpu_switch_context(struct process *next) {

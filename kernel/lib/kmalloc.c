@@ -136,6 +136,20 @@ void *kmalloc(size_t size) {
     /* Check free list for this bucket */
     if (buckets[idx]) {
       struct block_header *blk = buckets[idx];
+      
+      /* Validate block pointer and next pointer before following */
+      if ((uintptr_t)blk < (uintptr_t)heap_base || (uintptr_t)blk >= (uintptr_t)heap_end || ((uintptr_t)blk & 7)) {
+          pr_err("kmalloc: Corrupted bucket[%d] head pointer %p\n", idx, (void *)blk);
+          buckets[idx] = NULL; /* Emergency reset of corrupted list */
+          goto carve_new;
+      }
+
+      if (blk->magic != BLOCK_FREE) {
+          pr_err("kmalloc: Block %p in free list has invalid magic %x\n", (void *)blk, blk->magic);
+          buckets[idx] = NULL;
+          goto carve_new;
+      }
+
       buckets[idx] = blk->next;
       blk->magic = BLOCK_MAGIC;
       blk->size = size;
@@ -146,6 +160,7 @@ void *kmalloc(size_t size) {
       goto out;
     }
 
+carve_new:;
     /* No free block, carve from heap_ptr */
     size_t alloc_sz = bucket_sz;
     if (heap_ptr + alloc_sz <= heap_end) {
@@ -221,9 +236,24 @@ void kfree(void *ptr) {
    * two CPUs could both see BLOCK_MAGIC and both proceed to free. */
   spin_lock_irqsave(&kmalloc_lock, &flags);
 
+  /* Boundary check for heap-based allocations */
+  if (blk->bucket_idx != 0xFFFFFFFF) {
+      if ((uint8_t*)blk < heap_base || (uint8_t*)blk >= heap_end) {
+          spin_unlock_irqrestore(&kmalloc_lock, flags);
+          pr_err("kfree: Pointer %p is outside heap boundaries\n", ptr);
+          return;
+      }
+  }
+
+  if (blk->magic == BLOCK_FREE) {
+    spin_unlock_irqrestore(&kmalloc_lock, flags);
+    pr_err("kfree: DOUBLE FREE detected at %p\n", (void *)ptr);
+    return;
+  }
+
   if (blk->magic != BLOCK_MAGIC) {
     spin_unlock_irqrestore(&kmalloc_lock, flags);
-    pr_err("kfree: Invalid magic %x at %p\n", blk->magic, ptr);
+    pr_err("kfree: Invalid magic %x at %p (Corrupted header?)\n", blk->magic, (void *)ptr);
     return;
   }
 
@@ -232,6 +262,7 @@ void kfree(void *ptr) {
     size_t total_req = blk->size + sizeof(struct block_header);
     size_t pages = (total_req + 4095) / 4096;
     blk->magic = 0;
+    blk->bucket_idx = 0xEEEEEEEE; /* Mark as unallocated large block */
     spin_unlock_irqrestore(&kmalloc_lock, flags);
     pmm_free_pages((void *)blk, pages);
     return;

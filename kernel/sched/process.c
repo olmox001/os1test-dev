@@ -465,11 +465,13 @@ int process_terminate(int pid) {
   /* Free IPC message queue — must happen for all termination paths */
   {
     struct list_head *pos, *q;
+    spin_lock(&proc->msg_lock);
     list_for_each_safe(pos, q, &proc->msg_queue) {
       struct ipc_node *node = list_entry(pos, struct ipc_node, list);
       list_del(pos);
       kfree(node);
     }
+    spin_unlock(&proc->msg_lock);
   }
 
   /* If we are terminating OURSELVES: defer stack/pgd free to schedule() */
@@ -482,10 +484,22 @@ int process_terminate(int pid) {
   proc->state = PROC_DEAD;
 
   if (proc->on_cpu >= 0) {
-    /* Process is currently executing on another CPU.
+    /* Process is currently executing on some CPU (could be us or another).
      * We cannot free its kernel stack while it's being used.
-     * Leave it in the pool as PROC_DEAD; schedule() on that CPU
-     * will perform the deferred free after switching away. */
+     * Mark it as DEAD (or ZOMBIE if self-terminating); schedule() on its
+     * current CPU will perform the deferred free after switching context. */
+    if (current_process == proc) {
+        proc->state = PROC_ZOMBIE;
+    } else {
+        proc->state = PROC_DEAD;
+        /* Trigger reschedule on target CPU if it's not us?
+         * For now, next timer tick will handle it. */
+    }
+    
+    /* We also need to ensure that the process is not in any runqueue
+     * so it doesn't get picked again by another CPU. */
+    __dequeue_task(proc);
+
     spin_unlock_irqrestore(&sched_lock, flags);
     return 0;
   }
@@ -546,26 +560,48 @@ struct pt_regs *schedule(struct pt_regs *regs) {
    * away from that process's kernel stack in the previous schedule() call. */
   if (cpu_ptr->deferred_free_proc) {
     struct process *to_free = cpu_ptr->deferred_free_proc;
-    cpu_ptr->deferred_free_proc = NULL;
+    
+    /* Pointer validation to catch corruption early */
+    if ((uintptr_t)to_free < 0xFFFF000000000000ULL && (uintptr_t)to_free > 0x1000000ULL) {
+        /* Check if it's in our process pool */
+        bool found = false;
+        for (int i = 0; i < MAX_PROCESSES; i++) {
+            if (process_pool[i] == to_free) {
+                found = true;
+                break;
+            }
+        }
+        
+        if (found) {
+            cpu_ptr->deferred_free_proc = NULL;
 
-    /* Remove from pool */
-    uint64_t gflags;
-    spin_lock_irqsave(&sched_lock, &gflags);
-    for (int _i = 0; _i < MAX_PROCESSES; _i++) {
-      if (process_pool[_i] == to_free) {
-        process_pool[_i] = NULL;
-        active_count--;
-        break;
-      }
+            /* Remove from pool */
+            uint64_t gflags;
+            spin_lock_irqsave(&sched_lock, &gflags);
+            for (int _i = 0; _i < MAX_PROCESSES; _i++) {
+              if (process_pool[_i] == to_free) {
+                process_pool[_i] = NULL;
+                active_count--;
+                break;
+              }
+            }
+            spin_unlock_irqrestore(&sched_lock, gflags);
+
+            if (to_free->kernel_stack)
+              pmm_free_pages((void *)(to_free->kernel_stack - STACK_SIZE),
+                             STACK_SIZE / 4096);
+            if (to_free->page_table)
+              vmm_destroy_pgd(to_free->page_table);
+            pmm_free_page(to_free);
+        } else {
+            pr_err("SCHED: Invalid deferred_free_proc pointer %p (Not in pool)\n", (void *)to_free);
+            cpu_ptr->deferred_free_proc = NULL;
+        }
+    } else {
+        pr_err("SCHED: Corrupted deferred_free_proc pointer %p\n", (void *)to_free);
+        cpu_ptr->current_task = NULL; /* Also clear current_task if it led here */
+        cpu_ptr->deferred_free_proc = NULL;
     }
-    spin_unlock_irqrestore(&sched_lock, gflags);
-
-    if (to_free->kernel_stack)
-      pmm_free_pages((void *)(to_free->kernel_stack - STACK_SIZE),
-                     STACK_SIZE / 4096);
-    if (to_free->page_table)
-      vmm_destroy_pgd(to_free->page_table);
-    pmm_free_page(to_free);
   }
 
   uint32_t cpu = cpu_ptr->cpu_id;

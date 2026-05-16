@@ -60,7 +60,9 @@ int vprintk(const char *fmt, va_list args) {
 
   if (cpu->in_printk) {
     spin_unlock_irqrestore(&uart_lock, flags);
-    uart_puts("\n[RECURSIVE PRINTK DETECTED]\n");
+    uart_puts("\n[RECURSIVE PRINTK DETECTED on C");
+    uart_putc('0' + (cpu->cpu_id % 10));
+    uart_puts("]\n");
     return 0;
   }
 
