@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* Minimal math.h for Doom port */
+/* Minimal math.h for OS1 userland */
 
 int abs(int x);
 double fabs(double x);

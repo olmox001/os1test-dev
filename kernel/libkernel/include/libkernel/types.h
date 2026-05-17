@@ -4,13 +4,21 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <core/errno.h>
+#include <libkernel/errno.h>
 
 /* Kernel-specific aliases */
 typedef uint64_t phys_addr_t;
 typedef uint64_t virt_addr_t;
 typedef int32_t  pid_t;
 typedef int64_t  ssize_t;
+
+/* POSIX-compatible types (used by VFS layer) */
+typedef uint32_t mode_t;
+typedef uint32_t nlink_t;
+typedef uint32_t uid_t;
+typedef uint32_t gid_t;
+typedef int64_t  off_t;
+typedef int64_t  time_t;
 
 /* Status codes */
 typedef enum {
@@ -26,7 +34,6 @@ typedef enum {
 
 /* Helper Macros */
 #define UNUSED(x) (void)(x)
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 #define ALIGN_UP(x, a)   (((x) + ((a) - 1)) & ~((a) - 1))
 #define ALIGN_DOWN(x, a) ((x) & ~((a) - 1))

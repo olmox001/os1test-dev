@@ -42,26 +42,7 @@ volatile uint32_t cpu_boot_ack = 0;
 
 /* Compositor stubs compiled from compositor.c */
 
-/* VFS Stubs */
-long sys_open(const char *path, int flags, int mode) {
-    (void)path; (void)flags; (void)mode;
-    return -ENOSYS;
-}
-
-long sys_read(int fd, void *buf, size_t count) {
-    (void)fd; (void)buf; (void)count;
-    return -ENOSYS;
-}
-
-long sys_write(int fd, const void *buf, size_t count) {
-    (void)fd; (void)buf; (void)count;
-    return -ENOSYS;
-}
-
-long sys_close(int fd) {
-    (void)fd;
-    return -ENOSYS;
-}
+/* VFS stubs replaced by real implementations in syscall_proc.c */
 
 /* Moved to boot_fs.c */
 

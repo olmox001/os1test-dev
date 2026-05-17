@@ -55,12 +55,29 @@ Siamo giunti al completamento con successo delle fasi cardine di stabilizzazione
 *   **Protocollo a Messaggi**: Rimossa l'inclusione di funzioni C dirette. I driver registrano i propri callback mediante l'interfaccia a messaggi `hw_driver` in [drivers.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/drivers.c) ed eseguono comandi tramite messaggi IPC strutturati (`REG_MSG_BLK_READ`, `REG_MSG_MMIO_WRITE`, ecc.).
 
 ### 🟢 Isolamento degli Header & Sicurezza (COMPLETATO 100%)
-*   **Eradicata Dipendenza Kernel-Userland**: Precedentemente il loader ELF del kernel ([elf.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/sched/elf.c)) includeva l'header `elf.h` situato nel percorso `user/`. 
-*   **Risoluzione**: Abbiamo riscritto e reso l'header di parsing ELF del kernel [elf.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/include/core/elf.h) completamente autonomo e isolato in kernel-space, rimuovendo qualsiasi leakage di namespace verso gli header dell'userland.
+*   **Eradicata Dipendenza Kernel-Userland (elf.h)**: L'header di parsing ELF del kernel [elf.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/include/core/elf.h) è stato riscritto come completamente autonomo e isolato in kernel-space.
+*   **Eradicata Dipendenza Kernel-Userland (ipc.h, abi.h, font.h, errno.h)**: Creati header kernel-private in [ipc_types.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/libkernel/include/libkernel/ipc_types.h), [abi.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/include/core/abi.h), [font.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/include/core/font.h), [errno.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/include/core/errno.h). Rimosso `-Iuser/sys/include` dai CFLAGS del kernel nel Makefile. I tipi condivisi sono definizioni ABI duplicate intenzionalmente (stesso pattern di `elf.h`).
+*   **Makefile Namespace Isolation**: Il Makefile utilizza ora `KERNEL_INCLUDE` (senza path userland) per la compilazione kernel e `USER_INCLUDE` (con `-Iuser/sys/include`) per la compilazione userland.
 
-### 🟡 Fasi Successive: Integrazione Registro-VFS (Fase 3)
-*   **Stato**: `Pianificato / Disegnato`
-*   **Obiettivo**: Mappatura del registro tree in `/sys/registry` all'interno del VFS, permettendo l'I/O verso i driver mediante normali chiamate POSIX `open`/`read`/`write` sui nodi virtualizzati.
+### ⚠️ Compositor Kernel-Resident (Fase 3.5 Pianificata)
+*   **Stato**: `Conosciuto / Fase 3.5 Pianificata`
+*   **Situazione Attuale**: Il compositor grafico risiede nel kernel-space in [compositor.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/graphics/compositor.c) con 10 syscall dedicate (`SYS_CREATE_WINDOW`, `SYS_WINDOW_BLIT`, `SYS_COMPOSITOR_RENDER`, ecc.) dispatchate direttamente in [syscall.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/syscall.c).
+*   **Fase 3.5**: Migrazione del compositor a un demone user-space che comunica con il kernel tramite IPC e buffer condivisi, eliminando le syscall grafiche dirette e completando il modello microkernel.
+
+### 🟡 Fase 3a: VFS Skeleton (Prerequisito)
+*   **Stato**: `Pianificato`
+*   **Obiettivo**: Costruzione dell'infrastruttura VFS minima: tabella fd per-processo, interfacce `vfsops`/`vnodeops`, mount table, implementazione di `sys_open/read/write/close` attraverso il layer vnode.
+*   **Nota**: Le syscall VFS in [stubs.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/stubs.c) attualmente ritornano `-ENOSYS`. [vfs.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/include/core/vfs.h) contiene un solo prototipo (`vfs_resolve_path`).
+
+### 🟡 Fase 3b: Integrazione Registro-VFS (Bridge)
+*   **Stato**: `Pianificato`
+*   **Obiettivo**: Montaggio del registro dinamico in `/sys/registry` come pseudo-filesystem nel VFS, permettendo l'I/O verso i driver mediante normali chiamate POSIX `open`/`read`/`write` sui nodi virtualizzati.
+*   **Dipende da**: Fase 3a completata.
+
+### 🟡 Fase 3c: Hardware Autodiscovery
+*   **Stato**: `Pianificato`
+*   **Obiettivo**: Parsing di FDT (AArch64) e Multiboot2 tags (AMD64) dopo `registry_init()` per popolare `hardware/<device>/base_address` e `hardware/<device>/irq`.
+*   **Nota AMD64**: Il puntatore Multiboot2 `mbi_ptr` è attualmente scartato con `(void)mbi_ptr` in [main.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/main.c). Richiede implementazione del walker dei tag Multiboot2.
 
 ---
 
@@ -79,7 +96,11 @@ Siamo giunti al completamento con successo delle fasi cardine di stabilizzazione
 ├── kernel/                          # KERNEL SPACE
 │   ├── core/                        # Moduli Indipendenti dall'Architettura
 │   │   ├── include/core/            # Header di Sistema (sched.h, vfs.h, drivers.h)
-│   │   │   └── elf.h                # [SEPARATO] Header ELF autonomo del kernel
+│   │   │   ├── elf.h                # [ISOLATO] Header ELF autonomo del kernel
+│   │   │   ├── ipc.h                # [ISOLATO] Forwarder a libkernel/ipc_types.h
+│   │   │   ├── abi.h                # [ISOLATO] Numeri syscall kernel-private
+│   │   │   ├── font.h               # [ISOLATO] Strutture font kernel-private
+│   │   │   └── errno.h              # [ISOLATO] Codici errore POSIX kernel-private
 │   │   └── src/                     # Core del kernel (main.c, stubs.c, drivers.c)
 │   │       ├── fs/                  # Filesystem residenti (ext4.c, gpt.c)
 │   │       └── graphics/            # Compositor grafico residente (compositor.c)
@@ -95,7 +116,7 @@ Siamo giunti al completamento con successo delle fasi cardine di stabilizzazione
 │   │   └── user/                    # Startup e trampolini syscall dell'Userland
 │   │
 │   └── libkernel/                   # LIBRERIA CONDIVISA DEL KERNEL
-│       ├── include/libkernel/       # Tipi base, stringhe, ctype, math
+│       ├── include/libkernel/       # Tipi base, stringhe, ctype, math, ipc_types.h
 │       └── src/                     # Implementazioni (registry.c, printk.c, kmalloc.c)
 │
 ├── tools/                           # Strumenti di Compilazione Host (mkdisk, etc.)
@@ -148,10 +169,10 @@ make test-release ARCH=amd64
 
 ## 🧠 Conoscenze Accumulate e Best Practices
 
-1. **Allocazione del Registro Zero-Heap-Loss**:
-   * Il registro gerarchico in [registry.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/libkernel/src/registry.c) opera tramite pool di nodi statici (`REG_POOL_SIZE = 128`), garantendo assoluta assenza di frammentazione dell'heap del kernel durante l'avvio e l'esecuzione.
+1. **Allocazione del Registro con Pool Statico + Code Heap-Bounded**:
+   * I nodi del registro gerarchico in [registry.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/libkernel/src/registry.c) sono allocati da un pool statico (`REG_POOL_SIZE = 256`), evitando frammentazione dell'heap per la struttura ad albero. Le code IPC (`struct reg_queue`, 386 byte ciascuna) sono allocate via `kmalloc` al momento della registrazione dei driver (bounded early-boot heap allocation).
 2. **Uso delle Code ad Anello per IPC**:
-   * Ogni nodo di coda del registro dispone di un ring-buffer protetto da spinlock locali che gestisce la ricezione/invio asincrono di messaggi `reg_msg` (profondità coda: `REG_QUEUE_DEPTH = 16`).
+   * Ogni nodo di coda del registro dispone di un ring-buffer protetto da spinlock locali che gestisce la ricezione/invio asincrono di messaggi `reg_msg` (profondità coda: `REG_QUEUE_DEPTH = 16`). Le code sono heap-allocate al tempo di registrazione del driver tramite `reg_ipc_init_queue()`.
 3. **Isolamento della HAL**:
    * La HAL deve rimanere unicamente lo strato hardware primario di aggancio per i registri CPU. Qualsiasi calcolo logico sui descrittori di processo, tabelle VFS o blitting grafici risiede fermamente nel Kernel Core unificato, preservando la portabilità.
 4. **Namespace Sanitization**:

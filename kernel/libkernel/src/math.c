@@ -4,11 +4,22 @@
  */
 #include <libkernel/math.h>
 
+/* These are also defined in libkernel/math.h — guards prevent redefinition errors */
+#ifndef FP_SHIFT
 #define FP_SHIFT 16
+#endif
+#ifndef FP_ONE
 #define FP_ONE   (1 << FP_SHIFT)
+#endif
+#ifndef FP_HALF
 #define FP_HALF  (1 << (FP_SHIFT - 1))
+#endif
+#ifndef FP_PI
 #define FP_PI    205887
+#endif
+#ifndef FP_2PI
 #define FP_2PI   411775
+#endif
 
 uint32_t k_isqrt(uint32_t n) {
     if (n == 0) return 0;

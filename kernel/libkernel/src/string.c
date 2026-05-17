@@ -1,5 +1,9 @@
 #include <libkernel/string.h>
+#ifdef KERNEL
+#include <libkernel/ctype.h>
+#else
 #include <ctype.h>
+#endif
 
 size_t strlen(const char *s) {
     if (!s) return 0;

@@ -41,9 +41,13 @@ The dual-architecture microkernel of OS1 is developed by combining proven patter
 
 ```mermaid
 graph TD
-    P1[Phase 1: HAL Decoupling & Relocation] -->|COMPLETED| P2[Phase 2: Message-Based Drivers]
-    P2 -->|COMPLETED| P3[Phase 3: Plan 9 VFS Registry Tree]
-    P3 -->|PLANNED| P4[Phase 4: Compile & Header Hardening]
+    P1[Phase 1: HAL Decoupling] -->|COMPLETED| P2[Phase 2: Message-Based Drivers]
+    P2 -->|COMPLETED| P3A[Phase 3a: VFS Skeleton]
+    P3A -->|PLANNED| P3B[Phase 3b: Registry-VFS Bridge]
+    P3A -->|PLANNED| P3C[Phase 3c: Hardware Autodiscovery]
+    P3B --> P35[Phase 3.5: Compositor Migration]
+    P3C --> P35
+    P35 -->|PLANNED| P4[Phase 4: Header Consolidation]
 ```
 
 ### 🟢 Phase 1: HAL Decoupling, Relocation, and Thinning
@@ -63,22 +67,65 @@ graph TD
     2.  **Message-Based Interfaces**: Implemented `struct hw_driver` messaging protocol and dispatch queues in [drivers.h](kernel/core/include/core/drivers.h) and [drivers.c](kernel/core/src/drivers.c).
     3.  **Driver Port Refactoring**: Shifted UART (PL011/16550) and VirtIO-Block to register under the message dispatcher, resolving driver access through port-based IPC message queues rather than direct C function binding.
 
-### 🟡 Phase 3: Plan 9 + seL4 Style Hierarchical VFS Registry Integration
+### 🟡 Phase 3a: VFS Skeleton (Prerequisite)
 *   **Status**: `[ ] PLANNED`
-*   **Goal**: Position the dynamic registry and IPC message queues as the foundational base layer directly beneath VFS and Compositor services. Mount the registry dynamically into the VFS, allowing high-level services (VFS, Compositor, future Network stack) to query drivers and communicate via virtualized files.
+*   **Goal**: Build the minimum VFS infrastructure required before the registry can be mounted as a pseudo-filesystem. Currently, all VFS syscalls return `-ENOSYS` (see `stubs.c`) and `vfs.h` contains only one prototype (`vfs_resolve_path`).
 *   **Execution Blueprint**:
-    1.  **Registry Hierarchy Setup**: Build dynamic tree nodes using `RegKey` and `RegIpcQueue` descriptors.
-    2.  **Hardware Autodiscovery**: Parse FDT (AArch64) and Multiboot v2 tags (AMD64) at boot, populating `/sys/registry/hardware/` dynamically with IRQs and MMIO addresses.
-    3.  **VFS Mounting**: Mount `/sys/registry` into the virtual filesystem tree so that subsystems write and read hardware attributes using standard file descriptors:
+    1.  **Per-Process FD Table**: Implement `struct file *fd_table[]` in the process structure, with fd 0/1/2 pre-wired to the console.
+    2.  **VFS Interfaces**: Define `struct vfsops` and `struct vnodeops` interface stubs in [vfs.h](kernel/core/include/core/vfs.h).
+    3.  **Mount Table**: Implement `vfs_mount_table[]` with the boot Ext4 filesystem as the initial entry.
+    4.  **Syscall Routing**: Implement `sys_open/read/write/close` routing through the vnode layer, replacing the current `-ENOSYS` stubs.
+
+### 🟡 Phase 3b: Plan 9 + seL4 Style Registry-VFS Bridge
+*   **Status**: `[ ] PLANNED`
+*   **Depends On**: Phase 3a completed.
+*   **Goal**: Mount the dynamic registry into the VFS as a pseudo-filesystem at `/sys/registry`, allowing high-level services to query drivers via standard file descriptors.
+*   **Execution Blueprint**:
+    1.  **Registry VFS Ops**: Implement `reg_vfs_open/read/write/readdir` that translate fd operations into `registry_get/registry_set/registry_list` calls.
+    2.  **Pseudo-FS Registration**: Register the registry as a pseudo-filesystem type in the mount table at `/sys/registry`.
+    3.  **Verification**: Test with actual registry paths:
         ```c
-        int fd = open("/sys/registry/hardware/uart/baud_rate", O_WRONLY);
-        write(fd, "115200", 6);
+        int fd = open("/sys/registry/drivers/uart/type", O_RDONLY);
+        char buf[128];
+        read(fd, buf, sizeof(buf)); // buf = "PL011" or "16550"
         close(fd);
         ```
 
-### 🟡 Phase 4: Header Synchronization & Cleaning
+### 🟡 Phase 3c: Hardware Autodiscovery
 *   **Status**: `[ ] PLANNED`
+*   **Can Parallel**: With Phase 3b once Phase 3a is done.
+*   **Goal**: Parse FDT (AArch64) and Multiboot v2 tags (AMD64) at boot to dynamically populate hardware metadata in the registry.
+*   **Execution Blueprint**:
+    1.  **AMD64 Multiboot2 Walker**: Implement tag parser in `kernel_main()` to extract memory map and ACPI/RSDP pointer (currently `mbi_ptr` is discarded with `(void)mbi_ptr`).
+    2.  **Post-Registry Population**: Call FDT/Multiboot2 parsing *after* `registry_init()` and populate `hardware/<device>/base_address` and `hardware/<device>/irq` from parsed data.
+    3.  **AArch64 FDT Reordering**: Move FDT-based hardware population to occur after registry initialization (currently `fdt_init()` runs before `registry_init()`).
+
+### ⚠️ Phase 3.5: Compositor User-Space Migration
+*   **Status**: `[ ] PLANNED`
+*   **Goal**: Migrate the kernel-resident graphics compositor from [compositor.c](kernel/core/src/graphics/compositor.c) to a user-space daemon. Currently 10 compositor syscalls (`SYS_CREATE_WINDOW`, `SYS_WINDOW_BLIT`, `SYS_COMPOSITOR_RENDER`, etc.) are dispatched directly in [syscall.c](kernel/core/src/syscall.c).
+*   **Execution Blueprint**:
+    1.  Create a user-space compositor daemon (`user/sys/bin/compositor.c`).
+    2.  Replace direct compositor syscalls with IPC messages to the compositor daemon.
+    3.  Implement shared memory buffer mapping for framebuffer blitting.
+    4.  Remove compositor code from kernel-space.
+
+### 🟡 Phase 4: Header Synchronization & Cleaning
+*   **Status**: `[ ] PARTIALLY COMPLETED`
 *   **Goal**: Eradicate standard user library overlaps, establish strict compilation boundaries, and protect kernel memory mapping from namespace leakage.
 *   **Execution Blueprint**:
-    1.  **Standard Segregation**: Audit userland includes in [user/sys/include/](user/sys/include/). Ensure `user/sys/include/elf.h` is strictly decoupled from the microkernel's segment loader under `kernel/core/include/core/elf.h`.
-    2.  **Namespace Audits**: Configure compilation flags to ensure that [kernel/core/](kernel/core/) and [kernel/hal/](kernel/hal/) compile exclusively using `libkernel` utility definitions and never pull in userland headers.
+    1.  `[x]` **DONE** — Standard Segregation: `user/sys/include/elf.h` is strictly decoupled from `kernel/core/include/core/elf.h`. Both headers exist independently.
+    2.  `[x]` **DONE** — Full namespace isolation: Created kernel-private headers for `ipc_types.h`, `abi.h`, `font.h`, `errno.h`. Removed `-Iuser/sys/include` from kernel CFLAGS. Makefile now uses `KERNEL_INCLUDE` and `USER_INCLUDE` separately.
+    3.  `[ ]` **Remaining** — Namespace Audits: Verify no regression occurs and all shared types (ABI definitions) remain byte-identical between kernel and user copies.
+
+### 🟢 Correct Execution Order for Phase 3
+
+```mermaid
+graph TD
+    A1["Fix ipc.h Leakage (A1)"] -->|DONE| B2["Decide Path Namespace (B2)"]
+    B2 --> P3A["Phase 3a: VFS Skeleton"]
+    P3A --> P3B["Phase 3b: Registry-VFS Bridge"]
+    P3A --> P3C["Phase 3c: Hardware Autodiscovery"]
+    P3B --> P35["Phase 3.5: Compositor Migration"]
+    P3C --> P35
+    P35 --> P4["Phase 4: Header Consolidation"]
+```

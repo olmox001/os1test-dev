@@ -1,9 +1,20 @@
-#ifndef _OS1_ABI_H
-#define _OS1_ABI_H
+/*
+ * kernel/core/include/core/abi.h
+ *
+ * Kernel-private copy of ABI syscall numbers.
+ * The user-facing copy lives in user/sys/include/abi.h — both must
+ * remain identical for ABI compatibility.
+ *
+ * This header is fully self-contained (no external includes needed)
+ * to prevent namespace leakage from userland headers.
+ */
+
+#ifndef _CORE_ABI_H
+#define _CORE_ABI_H
 
 /*
  * OS1 Microkernel ABI — Syscall Numbers
- * Matches user/arch/aarch64/syscall.S and user/arch/amd64/syscall.S exactly.
+ * Matches user/arch/ARCH/syscall.S and user/sys/include/abi.h exactly.
  */
 
 /* POSIX-compatible I/O */
@@ -54,8 +65,8 @@
 #define SYS_REG_IPC_PEND       262
 #define SYS_REG_LIST           263
 
-/* VFS POSIX FILE I/O */
+/* VFS POSIX FILE I/O — fd-based open/close backed by vnode layer */
 #define SYS_OPEN               264
 #define SYS_CLOSE              265
 
-#endif /* _OS1_ABI_H */
+#endif /* _CORE_ABI_H */

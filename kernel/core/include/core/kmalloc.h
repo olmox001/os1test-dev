@@ -1,20 +1,10 @@
 /*
- * kernel/include/kernel/kmalloc.h
- * Kernel Heap Allocator
+ * kernel/core/include/core/kmalloc.h
+ * Forwarder — canonical declarations in libkernel/kmalloc.h.
  */
-#ifndef _KERNEL_KMALLOC_H
-#define _KERNEL_KMALLOC_H
+#ifndef _CORE_KMALLOC_H
+#define _CORE_KMALLOC_H
 
-#include <libkernel/types.h>
+#include <libkernel/kmalloc.h>
 
-void kmalloc_init(void);
-void *kmalloc(size_t size);
-void *kcalloc(size_t nmemb, size_t size);
-void *krealloc(void *ptr, size_t new_size);
-void kfree(void *ptr);
-
-/* Macros for stb_truetype compatibility */
-#define STBTT_malloc(x, u) ((void)(u), kmalloc(x))
-#define STBTT_free(x, u) ((void)(u), kfree(x))
-
-#endif /* _KERNEL_KMALLOC_H */
+#endif /* _CORE_KMALLOC_H */

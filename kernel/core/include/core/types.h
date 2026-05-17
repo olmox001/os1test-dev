@@ -1,13 +1,10 @@
 /*
- * kernel/include/kernel/types.h
- * Core kernel types and definitions
+ * kernel/core/include/core/types.h
+ * Forwarder — canonical definitions in libkernel/types.h.
  */
-#ifndef _KERNEL_TYPES_H
-#define _KERNEL_TYPES_H
+#ifndef _CORE_TYPES_H
+#define _CORE_TYPES_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include "posix_types.h"
+#include <libkernel/types.h>
 
-#endif /* _KERNEL_TYPES_H */
+#endif /* _CORE_TYPES_H */

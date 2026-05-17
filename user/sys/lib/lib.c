@@ -125,7 +125,7 @@ int notify(const char *title, const char *msg) {
   return send(pid, &imsg);
 }
 
-/* --- Doom/LibC Compatibility --- */
+/* --- LibC Compatibility --- */
 
 FILE *fopen(const char *path, const char *mode) {
   FILE *f = malloc(sizeof(FILE));

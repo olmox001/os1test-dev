@@ -10,6 +10,7 @@
 #include <core/kmalloc.h>
 #include <core/boot_fs.h>
 #include <core/syscall.h>
+#include <core/vfs.h>
 #include <libkernel/string.h>
 
 /* Extern from boot_fs.c */
@@ -101,20 +102,38 @@ long sys_write_fd(int fd, const void *buf, size_t count) {
 }
 
 long sys_read_fd(int fd, void *buf, size_t count) {
-    if (fd != 0) return -ENOSYS;
+    /* fd 0 → stdin (keyboard) */
+    if (fd == 0) {
+        struct ipc_message msg;
+        if (sys_ipc_try_recv(-1, &msg) < 0) return 0;
 
-    /* stdin: try to pull a keyboard event from the current process msg queue */
-    struct ipc_message msg;
-    if (sys_ipc_try_recv(-1, &msg) < 0) return 0;
-
-    if (msg.type == IPC_TYPE_INPUT) {
-        uint8_t key = (uint8_t)(msg.data1 & 0xFF);
-        if (count >= 1) {
-            vmm_copy_to_user(buf, &key, 1);
-            return 1;
+        if (msg.type == IPC_TYPE_INPUT) {
+            uint8_t key = (uint8_t)(msg.data1 & 0xFF);
+            if (count >= 1) {
+                vmm_copy_to_user(buf, &key, 1);
+                return 1;
+            }
         }
+        return 0;
     }
-    return 0;
+
+    /* fd >= 3 → vnode-backed file (VFS Phase 3a) */
+    if (fd >= 3 && fd < MAX_FDS) {
+        struct file *fp = current_process ? current_process->fd_table[fd] : NULL;
+        if (!fp) return -EBADF;
+
+        uint8_t *k_buf = kmalloc(count);
+        if (!k_buf) return -ENOMEM;
+
+        int bytes = VOP_READ(fp->f_vnode, k_buf, count, &fp->f_offset);
+        if (bytes > 0)
+            vmm_copy_to_user(buf, k_buf, (size_t)bytes);
+
+        kfree(k_buf);
+        return (long)bytes;
+    }
+
+    return -EBADF;
 }
 
 /* ================================================================
@@ -197,4 +216,50 @@ long sys_getcwd(char *buf, size_t size) {
     if (len > size) return -34; /* -ERANGE */
 
     return vmm_copy_to_user(buf, cwd, len);
+}
+
+/* ================================================================
+   POSIX fd-based VFS I/O  (SYS_OPEN / SYS_CLOSE)
+   ================================================================ */
+
+long sys_open(const char *path, int flags) {
+    if (!current_process) return -ESRCH;
+
+    char k_path[256];
+    if (vmm_copy_string_from_user(k_path, path, sizeof(k_path)) != 0)
+        return -EFAULT;
+
+    /* Reserve fd 3+ for vnode-backed files; 0/1/2 are console. */
+    int fd = -1;
+    for (int i = 3; i < MAX_FDS; i++) {
+        if (!current_process->fd_table[i]) { fd = i; break; }
+    }
+    if (fd < 0) return -EMFILE;
+
+    struct vnode *vp = NULL;
+    int err = ext4_open_path(k_path, &vp);
+    if (err) return (long)err;
+
+    struct file *fp = file_alloc(vp, flags);
+    if (!fp) { vrele(vp); return -ENOMEM; }
+
+    /* vref was bumped by both ext4_open_path AND file_alloc; drop one. */
+    vrele(vp);
+
+    current_process->fd_table[fd] = fp;
+    return (long)fd;
+}
+
+long sys_close(int fd) {
+    if (!current_process) return -ESRCH;
+    if (fd < 3 || fd >= MAX_FDS) return -EBADF;
+
+    struct file *fp = current_process->fd_table[fd];
+    if (!fp) return -EBADF;
+
+    current_process->fd_table[fd] = NULL;
+    if (fp->f_vnode)
+        vrele(fp->f_vnode);
+    file_free(fp);
+    return 0;
 }

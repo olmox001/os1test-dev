@@ -140,6 +140,10 @@ void kernel_main(uint64_t fdt_ptr) {
         panic("Microkernel: Failed to initialize boot filesystem");
     }
 
+    /* 8b. VFS layer (Phase 3a) — mount Ext4 as root filesystem */
+    extern void vfs_init(void);
+    vfs_init();
+
     /* 9. Phase 2 — register drivers in hierarchical registry */
     register_drivers();
 

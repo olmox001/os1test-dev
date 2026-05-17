@@ -80,7 +80,7 @@ void free(void *ptr) {
     }
 
     /* Coalescing with previous would require a full walk or doubly linked list.
-     * Given Doom's allocation patterns, this simple strategy should suffice. */
+     * For typical userland allocation patterns, this simple strategy should suffice. */
 }
 
 void *realloc(void *ptr, size_t size) {

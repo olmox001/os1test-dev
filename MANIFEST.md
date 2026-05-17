@@ -109,8 +109,8 @@ This manifest documents the complete, clean directory structure of the **OS1 Mic
 *   **System Daemons** (`user/sys/bin/`):
     *   [init.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/bin/init.c): PID 2 init orchestration manager.
     *   [notification_server.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/bin/notification_server.c): Graphic notifications popup process.
-    *   [shell.c](file:///Users/olmo/Documents/git/ostest1/user/sys/bin/shell.c): Interactive terminal environment shell.
-    *   [regedit.c](file:///Users/olmo/Documents/git/ostest1/user/sys/bin/regedit.c): Registry editor viewer utility.
+    *   [shell.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/bin/shell.c): Interactive terminal environment shell.
+    *   [regedit.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/bin/regedit.c): Registry editor viewer utility.
 *   **Standard Library Core** (`user/sys/lib/`):
     *   [malloc.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/lib/malloc.c): Userland allocator wrapper.
     *   [lib.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/lib/lib.c): Drawing, GUI windows and string facilities.

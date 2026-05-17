@@ -10,7 +10,7 @@
 #include <core/sched.h>
 #include <libkernel/types.h>
 #include <libkernel/string.h>
-#include <posix_types.h>
+
 
 /* Keyboard state */
 static int shift_pressed = 0;

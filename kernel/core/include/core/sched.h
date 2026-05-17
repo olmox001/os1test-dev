@@ -12,6 +12,9 @@
 #define STACK_SIZE 131072
 #define MAX_PRIO 32
 
+/* VFS fd table size and file struct (defined fully in core/vfs/file.h) */
+#include <core/vfs/file.h>
+
 /* Process Info for Diagnostics */
 struct ps_info {
   int pid;
@@ -87,6 +90,10 @@ struct process {
   /* Filesystem state */
   char cwd[128];  /* Current Working Directory */
   char root[128]; /* Root Directory namespace */
+
+  /* Open file descriptor table (VFS Phase 3a).
+   * fd 0/1/2 are console-backed; fd >= 3 are vnode-backed. */
+  struct file *fd_table[MAX_FDS];
 };
 
 /* Process States */

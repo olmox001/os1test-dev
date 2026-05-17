@@ -5,7 +5,7 @@
 #include <core/graphics/gl.h>
 #include <core/graphics.h>
 #include <libkernel/types.h>
-#include <font.h>
+#include <core/font.h>
 #include <hal/drivers/gpu/gpu.h>
 
 /* Include the pre-rasterized Rewir-Light.ttf */

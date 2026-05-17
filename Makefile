@@ -58,8 +58,9 @@ else
     QEMU = qemu-system-aarch64
 endif
 
-CFLAGS = $(COMMON_FLAGS) $(ARCH_CFLAGS) $(INCLUDE)
-CXXFLAGS = $(COMMON_FLAGS) $(ARCH_CFLAGS) $(INCLUDE) -fno-exceptions -fno-rtti
+CFLAGS = $(COMMON_FLAGS) $(ARCH_CFLAGS) $(KERNEL_INCLUDE)
+CXXFLAGS = $(COMMON_FLAGS) $(ARCH_CFLAGS) $(KERNEL_INCLUDE) -fno-exceptions -fno-rtti
+USER_CFLAGS = $(COMMON_FLAGS) $(ARCH_CFLAGS) $(USER_INCLUDE)
 
 # Tools
 CC      = $(CROSS_COMPILE)gcc
@@ -81,7 +82,12 @@ USER_SYS_DIR = $(USER_DIR)/sys
 USER_LIB_DIR = $(USER_SYS_DIR)/lib
 USER_BIN_DIR = $(USER_SYS_DIR)/bin
 USER_ARCH_DIR = $(KERNEL_DIR)/hal/user/arch/$(ARCH)
-INCLUDE    = -Ikernel/core/include -Ikernel/hal/include -Ikernel/hal/arch/$(ARCH)/include -Ikernel/libkernel/include -Iuser/sys/include
+# Kernel-only include paths — NEVER includes user/sys/include (namespace isolation)
+KERNEL_INCLUDE = -Ikernel/core/include -Ikernel/hal/include -Ikernel/hal/arch/$(ARCH)/include -Ikernel/libkernel/include -Ikernel/module/include
+# Userland include paths — includes both kernel shared headers and user headers
+USER_INCLUDE   = $(KERNEL_INCLUDE) -Iuser/sys/include
+# INCLUDE defaults to kernel-only for backward compat with boot rules
+INCLUDE    = $(KERNEL_INCLUDE)
 
 # Output files
 BOOTLOADER_ELF = $(BUILD_DIR)/bootloader.elf
@@ -119,7 +125,7 @@ KERN_ASM_SOURCES = \
     $(ARCH_DIR)/cpu/exception.S
 endif
 
-# --- HAL Sources (Architecture-Specific) ---
+# --- HAL Sources (Architecture-Specific only — no drivers, no mm/irq) ---
 ifeq ($(ARCH), amd64)
 HAL_SOURCES = \
     $(ARCH_DIR)/cpu/cpu.c \
@@ -130,13 +136,9 @@ HAL_SOURCES = \
     $(ARCH_DIR)/cpu/apic.c \
     $(ARCH_DIR)/mm/mmu.c \
     $(ARCH_DIR)/mm/uaccess.c \
-    $(KERNEL_DIR)/hal/drivers/mmio/uart/16550.c \
-    $(KERNEL_DIR)/hal/drivers/mmio/timer/pic_pit.c \
     $(ARCH_DIR)/platform/platform.c \
     $(ARCH_DIR)/hal.c \
-    $(ARCH_DIR)/virtio.c \
-    $(KERNEL_DIR)/hal/drivers/pci/core/pci.c \
-    $(KERNEL_DIR)/hal/src/bus.c
+    $(ARCH_DIR)/virtio.c
 else
 HAL_SOURCES = \
     $(ARCH_DIR)/cpu/cpu.c \
@@ -144,11 +146,7 @@ HAL_SOURCES = \
     $(ARCH_DIR)/mm/mmu.c \
     $(ARCH_DIR)/platform.c \
     $(ARCH_DIR)/hal.c \
-    $(ARCH_DIR)/virtio.c \
-    $(KERNEL_DIR)/hal/drivers/mmio/uart/pl011.c \
-    $(KERNEL_DIR)/hal/drivers/mmio/gic/gic.c \
-    $(KERNEL_DIR)/hal/drivers/mmio/timer/timer.c \
-    $(KERNEL_DIR)/hal/src/bus.c
+    $(ARCH_DIR)/virtio.c
 endif
 
 # --- Libkernel Sources (Architecture-Agnostic) ---
@@ -162,46 +160,75 @@ LIBKERNEL_SOURCES = \
     $(KERNEL_DIR)/libkernel/src/stack_protector.c \
     $(KERNEL_DIR)/libkernel/src/kmalloc.c \
     $(KERNEL_DIR)/libkernel/src/registry.c \
-    $(KERNEL_DIR)/libkernel/src/fdt.c
+    $(KERNEL_DIR)/libkernel/src/fdt.c \
+    $(KERNEL_DIR)/libkernel/src/vfs/vfs_init.c \
+    $(KERNEL_DIR)/libkernel/src/vfs/vfs_subr.c \
+    $(KERNEL_DIR)/libkernel/src/vfs/vfs_hash.c \
+    $(KERNEL_DIR)/libkernel/src/vfs/vfs_cache.c \
+    $(KERNEL_DIR)/libkernel/src/vfs/vfs_mount.c \
+    $(KERNEL_DIR)/libkernel/src/vfs/vfs_lookup.c \
+    $(KERNEL_DIR)/libkernel/src/vfs/vfs_file.c
 
 # --- Microkernel Core Sources ---
 CORE_SOURCES = \
     $(KERNEL_DIR)/core/src/main.c \
     $(KERNEL_DIR)/core/src/syscall.c \
     $(KERNEL_DIR)/core/src/stubs.c \
-    $(KERNEL_DIR)/core/src/boot_fs.c \
     $(KERNEL_DIR)/core/src/timer.c \
     $(KERNEL_DIR)/core/src/sched/process.c \
     $(KERNEL_DIR)/core/src/sched/elf.c \
     $(KERNEL_DIR)/core/src/syscall_proc.c \
-    $(KERNEL_DIR)/hal/src/mm/pmm.c \
-    $(KERNEL_DIR)/hal/src/mm/vmm.c \
-    $(KERNEL_DIR)/hal/src/mm/buffer.c \
-    $(KERNEL_DIR)/hal/src/irq/irq.c \
     $(KERNEL_DIR)/core/src/cpu.c \
-    $(KERNEL_DIR)/core/src/drivers.c
+    $(KERNEL_DIR)/core/src/drivers.c \
+    $(KERNEL_DIR)/core/src/bus.c \
+    $(KERNEL_DIR)/core/src/fs/boot_fs.c \
+    $(KERNEL_DIR)/core/src/gpu/graphics.c \
+    $(KERNEL_DIR)/core/src/mm/pmm.c \
+    $(KERNEL_DIR)/core/src/mm/vmm.c \
+    $(KERNEL_DIR)/core/src/mm/buffer.c \
+    $(KERNEL_DIR)/core/src/irq/irq.c
 
+# --- Module Sources (pluggable VFS adaptors + graphics rendering) ---
+MODULE_SOURCES = \
+    $(KERNEL_DIR)/module/fs/vfs_ext4.c \
+    $(KERNEL_DIR)/module/graphics/region.c \
+    $(KERNEL_DIR)/module/graphics/gl.c \
+    $(KERNEL_DIR)/module/graphics/font.c \
+    $(KERNEL_DIR)/module/graphics/compositor.c
 
-# --- Legacy Drivers (To be moved to user-space) ---
+# --- Driver Sources (device drivers, formerly hal/drivers/) ---
+ifeq ($(ARCH), amd64)
 DRIVER_SOURCES = \
-    $(KERNEL_DIR)/hal/drivers/console.c \
-    $(KERNEL_DIR)/hal/drivers/irq_ctrl.c \
-    $(KERNEL_DIR)/hal/drivers/sys_timer.c \
-    $(KERNEL_DIR)/hal/drivers/pci/storage/virtio_blk.c \
-    $(KERNEL_DIR)/hal/drivers/pci/input/virtio_input.c \
-    $(KERNEL_DIR)/hal/drivers/pci/graphics/virtio_gpu.c \
-    $(KERNEL_DIR)/hal/drivers/pci/graphics/gpu_core.c \
-    $(KERNEL_DIR)/hal/drivers/pci/input/keyboard.c \
-    $(KERNEL_DIR)/core/src/graphics/graphics.c \
-    $(KERNEL_DIR)/core/src/graphics/region.c \
-    $(KERNEL_DIR)/core/src/graphics/gl.c \
-    $(KERNEL_DIR)/core/src/graphics/font.c \
-    $(KERNEL_DIR)/core/src/graphics/compositor.c
+    $(KERNEL_DIR)/driver/console.c \
+    $(KERNEL_DIR)/driver/irq_ctrl.c \
+    $(KERNEL_DIR)/driver/sys_timer.c \
+    $(KERNEL_DIR)/driver/mmio/uart/16550.c \
+    $(KERNEL_DIR)/driver/mmio/timer/pic_pit.c \
+    $(KERNEL_DIR)/driver/pci/core/pci.c \
+    $(KERNEL_DIR)/driver/pci/storage/virtio_blk.c \
+    $(KERNEL_DIR)/driver/pci/input/virtio_input.c \
+    $(KERNEL_DIR)/driver/pci/graphics/virtio_gpu.c \
+    $(KERNEL_DIR)/driver/pci/graphics/gpu_core.c \
+    $(KERNEL_DIR)/driver/pci/input/keyboard.c
+else
+DRIVER_SOURCES = \
+    $(KERNEL_DIR)/driver/console.c \
+    $(KERNEL_DIR)/driver/irq_ctrl.c \
+    $(KERNEL_DIR)/driver/sys_timer.c \
+    $(KERNEL_DIR)/driver/mmio/uart/pl011.c \
+    $(KERNEL_DIR)/driver/mmio/gic/gic.c \
+    $(KERNEL_DIR)/driver/mmio/timer/timer.c \
+    $(KERNEL_DIR)/driver/pci/storage/virtio_blk.c \
+    $(KERNEL_DIR)/driver/pci/input/virtio_input.c \
+    $(KERNEL_DIR)/driver/pci/graphics/virtio_gpu.c \
+    $(KERNEL_DIR)/driver/pci/graphics/gpu_core.c \
+    $(KERNEL_DIR)/driver/pci/input/keyboard.c
+endif
 
-KERN_C_SOURCES = $(HAL_SOURCES) $(LIBKERNEL_SOURCES) $(CORE_SOURCES) $(DRIVER_SOURCES)
+KERN_C_SOURCES = $(HAL_SOURCES) $(LIBKERNEL_SOURCES) $(CORE_SOURCES) $(MODULE_SOURCES) $(DRIVER_SOURCES)
 
 KERN_CPP_SOURCES = \
-    $(KERNEL_DIR)/hal/drivers/cpp_test.cpp
+    $(KERNEL_DIR)/driver/cpp_test.cpp
 
 # Object files
 BOOT_OBJECTS = $(patsubst %.S,$(BUILD_DIR)/%.o,$(BOOT_SOURCES))
@@ -239,17 +266,20 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/$(ARCH_DIR)/drivers
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core/src/sched
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core/src/fs
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core/src/graphics
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/src/mm
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/src/irq
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/mmio/uart
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/mmio/gic
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/mmio/timer
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/pci/core
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/pci/storage
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/pci/graphics
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/pci/input
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core/src/gpu
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core/src/mm
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core/src/irq
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/module/fs
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/module/graphics
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/driver/mmio/uart
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/driver/mmio/gic
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/driver/mmio/timer
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/driver/pci/core
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/driver/pci/storage
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/driver/pci/graphics
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/driver/pci/input
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/libkernel/src
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/libkernel/src/vfs
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/lib
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/sys/lib
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/sys/bin
@@ -295,19 +325,19 @@ user: $(USER_ELFS)
 # User Compilations
 $(BUILD_DIR)/$(USER_DIR)/lib/%.o: $(USER_DIR)/lib/%.c
 	@mkdir -p $(dir $@)
-	@$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(USER_CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/$(USER_DIR)/sys/lib/%.o: $(USER_DIR)/sys/lib/%.c
 	@mkdir -p $(dir $@)
-	@$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(USER_CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/$(USER_DIR)/bin/%.o: $(USER_DIR)/bin/%.c
 	@mkdir -p $(dir $@)
-	@$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(USER_CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/$(USER_DIR)/sys/bin/%.o: $(USER_DIR)/sys/bin/%.c
 	@mkdir -p $(dir $@)
-	@$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(USER_CFLAGS) -c $< -o $@
 
 # Explicit dependencies for each user ELF
 $(BUILD_DIR)/init.elf: $(BUILD_DIR)/$(USER_DIR)/sys/bin/init.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
@@ -325,12 +355,12 @@ $(BUILD_DIR)/fontman.elf: $(BUILD_DIR)/$(USER_DIR)/sys/bin/fontman/fontman.o $(U
 
 $(BUILD_DIR)/$(USER_DIR)/sys/bin/fontman/%.o: $(USER_DIR)/sys/bin/fontman/%.c
 	@mkdir -p $(dir $@)
-	@$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(USER_CFLAGS) -c $< -o $@
 
 
 # Linking rule for user ELFs
 $(BUILD_DIR)/%.elf:
-	@$(CC) $(CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
+	@$(CC) $(USER_CFLAGS) -Wl,-Ttext=0x80000000 -e _start -o $@ $^
 
 # Common compilation rules
 $(BUILD_DIR)/%.o: %.S

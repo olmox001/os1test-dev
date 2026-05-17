@@ -30,6 +30,10 @@ long sys_list_dir(const char *path, char *buf, size_t size);
 long sys_chdir(const char *path);
 long sys_getcwd(char *buf, size_t size);
 
+/* POSIX fd-based I/O (Phase 3a VFS) */
+long sys_open(const char *path, int flags);
+long sys_close(int fd);
+
 /* ---------------------------------------------------------------
    Console I/O  (fd=1 → UART, fd>2 → compositor window)
    --------------------------------------------------------------- */

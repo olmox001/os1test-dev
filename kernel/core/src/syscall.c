@@ -11,7 +11,7 @@
 #include <core/syscall.h>
 #include <core/registry.h>
 #include <core/graphics.h>
-#include <abi.h>
+#include <core/abi.h>
 
 /* Prototype */
 struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame);
@@ -191,6 +191,15 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
 
     case SYS_SET_FONT:
         ret = (long)sys_set_font((void *)a0, (size_t)a1);
+        break;
+
+    /* ── POSIX fd-based VFS (Phase 3a) ──────────────────────── */
+    case SYS_OPEN:
+        ret = sys_open((const char *)a0, (int)a1);
+        break;
+
+    case SYS_CLOSE:
+        ret = sys_close((int)a0);
         break;
 
     default:
