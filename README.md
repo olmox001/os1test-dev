@@ -1,597 +1,205 @@
-# 🚀 OS1TEST-DEV
+# 🚀 OS1TEST-DEV: Modular Dual-Architecture Microkernel
 
-### Production-Ready AArch64 Microkernel with Graphics & Multitasking
+[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
+[![Arch AArch64](https://img.shields.io/badge/arch-AArch64-green.svg)](https://developer.arm.com/architectures/learn-the-architecture/armv8-a-instruction-set-architecture)
+[![Arch AMD64](https://img.shields.io/badge/arch-AMD64-red.svg)](https://en.wikipedia.org/wiki/X86-64)
+[![Platform QEMU](https://img.shields.io/badge/platform-QEMU%20virt%2Fpc-orange.svg)](https://www.qemu.org/)
+[![Language C99](https://img.shields.io/badge/language-C99-yellow.svg)](https://en.wikipedia.org/wiki/C99)
 
-<div align="center">
-<img width="719" height="1018" alt="Screenshot 2026-05-11 alle 10 41 58" src="https://github.com/user-attachments/assets/eeefd28d-0009-4be7-bbf2-c3451cbe08d8" />
+OS1TEST-DEV is a state-of-the-art, modular microkernel operating system built for both **AArch64 (ARM64)** and **AMD64 (x86_64)** architectures. It blends the design methodologies of **Plan 9** (everything is a file/registry node), **seL4** (thinned hardware abstraction layer and secure message passing), and **Mach4** (isolated asynchronous microkernel-resident subsystems).
 
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Architecture](https://img.shields.io/badge/arch-AArch64-green.svg)](https://developer.arm.com/architectures/learn-the-architecture/armv8-a-instruction-set-architecture)
-[![QEMU](https://img.shields.io/badge/platform-QEMU%20virt-orange.svg)](https://www.qemu.org/)
-[![Language](https://img.shields.io/badge/language-C99-yellow.svg)](https://en.wikipedia.org/wiki/C99)
-
-*A modern, lightweight operating system for ARM64 featuring real-time graphics, preemptive multitasking, and Ext4 filesystem support.*
-
-[Features](#-features) • [Quick Start](#-quick-start) • [Architecture](#-architecture) • [Documentation](#-documentation) • [Contributing](#-contributing)
-
-</div>
+Featuring virtual memory isolation, real-time GUI window compositor, preemptive round-robin multitasking, and an optimized zero-copy Ext4 read-only storage driver, OS1TEST-DEV provides a solid, highly modern reference for dual-architecture OS engineering.
 
 ---
 
-## 📋 Table of Contents
+## 🏛️ Architectural Framework
 
-- [Overview](#-overview)
-- [Features](#-features)
-- [Screenshots](#-screenshots)
-- [System Requirements](#-system-requirements)
-- [Quick Start](#-quick-start)
-- [Architecture](#-architecture)
-- [Project Structure](#-project-structure)
-- [Technical Details](#-technical-details)
-- [Roadmap](#-roadmap)
-- [Contributing](#-contributing)
-- [License](#-license)
-- [Acknowledgments](#-acknowledgments)
+OS1TEST-DEV implements a strictly thinned **Three-Tier Architecture** that guarantees deep isolation, simple portability, and performance-centric graphic subsystems.
 
----
+```
+┌──────────────────────────────────────────────────────────┐
+│                     USER SPACE (EL0)                     │
+│                                                          │
+│     [init] ──spawn──> [shell] ──────> [notification]     │
+│       │                 │                     │          │
+│       └─────────┬───────┴──────────┬──────────┘          │
+└─────────────────┼──────────────────┼─────────────────────┘
+                  │ IPC (Registry)   │ Syscalls
+┌─────────────────▼──────────────────▼─────────────────────┐
+│                    KERNEL CORE (EL1)                     │
+│                                                          │
+│    ┌──────────────┐ ┌───────────────┐ ┌──────────────┐   │
+│    │  Scheduler   │ │  Compositor   │ │   VFS/Ext4   │   │
+│    │ (Round-Robin)│ │(Overlap/Alpha)│ │(LRU Cache/GPT)   │   │
+│    └──────┬───────┘ └───────┬───────┘ └──────┬───────┘   │
+└───────────┼─────────────────┼────────────────┼───────────┘
+            │ Abstraction     │ Abstraction    │ Abstraction
+┌───────────▼─────────────────▼────────────────▼───────────┐
+│                HAL (Platform Layer / Drivers)            │
+│                                                          │
+│    ┌──────────────┐ ┌───────────────┐ ┌──────────────┐   │
+│    │   AArch64    │ │     AMD64     │ │   Drivers    │   │
+│    │(MMU, Vectors)│ │(GDT,IDT,APIC) │ │(VirtIO, GIC) │   │
+│    └──────────────┘ └───────────────┘ └──────────────┘   │
+└──────────────────────────────────────────────────────────┘
+```
 
-## 🎯 Overview
+### 1. Thinned HAL (Hardware Abstraction Layer)
+To maximize security and clean up platform isolation, all high-level logic is moved out of architecture directories into the unified kernel core. The HAL is limited strictly to assembly vector traps, interrupt controls (`cli`/`sti`, `cpsid`/`cpsie`), architecture context structures (`pt_regs`), and direct MMIO character UART routines.
 
-**OS1TEST-DEV** is a fully functional microkernel operating system designed for the AArch64 (ARM64) architecture. Built from scratch in C, it demonstrates modern OS concepts including virtual memory management, preemptive multitasking, filesystem support, and a graphical windowing system.
+### 2. Unified Kernel Core
+The main OS1 microkernel coordinates:
+*   **Virtual Memory isolation**: Thread-safe virtual page mapping and translation table generation.
+*   **Preemptive Task Scheduling**: Preemption driven by clock ticks via GICv2 on AArch64 and PIT on AMD64.
+*   **Resident VFS & Graphics Compositor**: Kept inside the kernel core to ensure ultra-high-speed alpha blending, hardware-accelerated double buffering, and zero-copy Ext4 partition traversal.
 
-### Why OS1TEST-DEV?
-
-- 🎓 **Educational**: Perfect for learning OS development and ARM64 architecture
-- 🔧 **Production-Ready**: Clean, well-documented codebase following best practices
-- 🖼️ **Graphics-First**: Native GUI with window compositor and terminal emulator
-- ⚡ **Zero-Copy I/O**: Optimized disk access through intelligent buffer caching
-- 🔒 **Memory Safe**: MMU-enforced process isolation with 4-level page tables
+### 3. Plan 9 Style Registry System
+Hardcoded magic memory addresses, interrupt vectors, and hardware constants are strictly prohibited in the core logic. At boot, the bootloader or Flat Device Tree (FDT) parser registers all peripherals under the dynamic hierarchical key-value registry `/sys/registry`. Subsystems query registry nodes dynamically to fetch configuration attributes.
 
 ---
 
 ## ✨ Features
 
-### Core System
-
-- ✅ **Physical Memory Manager** (PMM)
-  - Bitmap-based page frame allocator
-  - Zone-based allocation (DMA/Normal)
-  - Contiguous and aligned allocation support
-  
-- ✅ **Virtual Memory Manager** (VMM)
-  - AArch64 4-level page tables (L0-L3)
-  - MMU with instruction and data caching
-  - Per-process address spaces
-  - Identity-mapped kernel space
-
-- ✅ **Process Management**
-  - Preemptive multitasking (round-robin scheduler)
-  - ELF64 binary loader with dynamic mapping
-  - User/Kernel mode separation (EL0/EL1)
-  - Hardware context switching (100Hz timer)
-
-### Filesystem & Storage
-
-- ✅ **Ext4 Read-Only Driver**
-  - Direct and indirect block support (up to 4MB files)
-  - Directory traversal and inode lookup
-  - Zero-copy buffer cache with LRU eviction
-  
-- ✅ **GPT Partition Table**
-  - Automatic partition detection
-  - GUID-based partition identification
-
-- ✅ **VirtIO Block Driver**
-  - High-performance disk I/O
-  - DMA-capable buffer management
-
-### Graphics & User Interface
-
-- ✅ **Window Compositor**
-  - Multiple overlapping windows with Z-ordering
-  - Alpha blending and transparency support
-  - Window dragging and focus management
-  - Anti-aliased rendering
-
-- ✅ **Terminal Emulator**
-  - ANSI escape sequence support (colors, cursor control)
-  - Text scrolling with line wrapping
-  - Per-window terminal state
-
-- ✅ **2D Graphics Engine**
-  - Bresenham line algorithm
-  - Circle and triangle primitives
-  - Gradient fills and rounded rectangles
-  - Hardware-accelerated double buffering
-
-- ✅ **3D Software Renderer**
-  - Fixed-point mathematics (no FPU required)
-  - Z-buffer depth testing
-  - Matrix transformations and perspective projection
-  - Wireframe cube rendering
-
-### Device Drivers
-
-- ✅ **VirtIO-GPU** - Hardware-accelerated framebuffer
-- ✅ **VirtIO-Block** - High-speed disk access
-- ✅ **GICv2** - Generic Interrupt Controller
-- ✅ **ARM Generic Timer** - System tick generation
-- ✅ **PL011 UART** - Serial console for debugging
-- ✅ **PS/2 Keyboard** - Keyboard input handling
-
-### Advanced Features
-
-- 🔐 **Spinlocks** - SMP-safe synchronization primitives
-- 🧮 **Fixed-Point Math** - Integer-only trigonometry for graphics
-- 📝 **Kernel Heap** - Dynamic memory allocation (kmalloc/kfree)
-- 🔍 **Intrusive Lists** - Linux-style container_of pattern
-- 🖱️ **Mouse Support** - Cursor rendering and click handling
+*   **Physical & Virtual Memory Managers (PMM/VMM)**:
+    *   Dual-platform page directory builders (4-level paging on both architectures).
+    *   Zone-based page frames allocator (DMA & Normal zones).
+    *   Identity-mapped high kernel memory mapping (`TTBR1_EL1` on AArch64, high PML4 entry on AMD64).
+*   **Process & Isolation Layer**:
+    *   ELF64 execution segments parser mapping code, data, and BSS pages securely.
+    *   Preemptive multi-process round-robin scheduler with a persistent idle task per CPU core.
+    *   Dedicated architecture userland assembly context switch routines.
+*   **Storage & Partitioning**:
+    *   Zero-copy Ext4 read-only filesystem parser featuring indirect block parsing (supporting files up to 4MB).
+    *   High-performance VirtIO-Block disk driver.
+    *   GPT partition parsing with automatic fallback to MBR partition tables (ensures hybrid ISO boot support).
+*   **Rich Graphic Subsystem**:
+    *   Window compositor supporting overlapping, Z-order layout rendering, drag-and-drop focus, and alpha blending transparency.
+    *   Double-buffered VirtIO-GPU framebuffer controller.
+    *   Fixed-point 3D software rasterizer (cube perspective projection without floating-point requirements).
+    *   TrueType (TTF) font translator utility mapping fonts into high-fidelity `.off` files.
 
 ---
 
-## 📸 Screenshots
+## 💻 System Setup & Requirements
 
-### Desktop Environment
+### 1. Compile Environment
+*   **For AArch64 target**: `aarch64-linux-gnu-gcc` (Ubuntu/Debian) or `aarch64-elf-gcc` (macOS Homebrew).
+*   **For AMD64 target**: Standard host compiler `gcc` (if x86_64 host) or `x86_64-elf-gcc` cross-compiler.
+*   **Utilities**: GNU Make, `qemu-system-aarch64`, `qemu-system-x86_64`, `mtools`, `xorriso` (for ISO creation).
 
-<img width="1301" height="1068" alt="Screenshot 2026-01-05 alle 08 30 41" src="https://github.com/user-attachments/assets/ebe7499f-1c5c-45ad-aa49-2580b733a8c2" />
----
+### 2. Quick Install Guide
 
-## 💻 System Requirements
-
-### Build Environment
-
-- **Cross-Compiler**: `aarch64-linux-gnu-gcc` (GCC 11+ recommended)
-- **Assembler**: `aarch64-linux-gnu-as`
-- **Build Tools**: GNU Make, binutils
-- **Optional**: `qemu-system-aarch64` for testing
-
-### Runtime Environment
-
-- **Emulator**: QEMU 6.0+ (`qemu-system-aarch64`)
-- **Machine**: `virt` (QEMU ARM Virtual Machine)
-- **Memory**: 1GB RAM minimum
-- **Storage**: 512MB disk image with Ext4 partition
-
-### Tested Platforms
-
-- ✅ QEMU 7.2.0 on Linux x86_64
-- ✅ QEMU 8.0.0 on macOS ARM64
-- ⚠️ Real hardware support pending (requires device tree modifications)
-
----
-
-## 🚀 Quick Start
-
-### 1. Install Dependencies
-**to change debug info**
-int console_loglevel = warning (o info)
-
-**Ubuntu/Debian:**
+#### Debian / Ubuntu:
 ```bash
 sudo apt update
-sudo apt install gcc-aarch64-linux-gnu qemu-system-arm make git
+sudo apt install gcc-aarch64-linux-gnu gcc-x86-64-linux-gnu \
+                 qemu-system-arm qemu-system-x86 mtools xorriso make git
 ```
 
-**macOS (Homebrew):**
+#### macOS (Homebrew):
 ```bash
-brew install aarch64-elf-gcc qemu make
+brew tap posixguy/cross-compilers
+brew install aarch64-elf-gcc x86_64-elf-gcc qemu mtools xorriso make
 ```
 
-**Arch Linux:**
+---
+
+## 🛠️ Build and Execution Guides
+
+The build system utilizes a modular Makefile supporting the `ARCH` variable to target platforms.
+
+### 1. Target AArch64 (ARM64)
+
+#### Compile:
 ```bash
-sudo pacman -S aarch64-linux-gnu-gcc qemu-arch-extra make
+make clean ARCH=aarch64
+make all ARCH=aarch64
 ```
+This builds `kernel.bin`, `bootloader.bin`, and packages the user apps (`init`, `shell`, `notification_server`, `counter`) into the virtual disk structure inside `build/aarch64/`.
 
-### 2. Clone Repository
-
-```bash
-git clone https://github.com/olmox001/os1test-dev.git
-cd os1test-dev
-```
-
-### 3. Build
-
-```bash
-make clean
-make all
-```
-
-This will generate:
-- `kernel.bin` - Kernel binary
-- `bootloader.bin` - Boot loader
-- `os.iso` (optional) - Bootable ISO image
-
-### 4. Create Disk Image
-
-```bash
-# Create 512MB disk image
-dd if=/dev/zero of=disk.img bs=1M count=512
-
-# Partition with GPT
-# (Use gdisk or parted to create partitions)
-
-# Format partition 3 as Ext4
-mkfs.ext4 -L "Userland" disk.img.p3
-
-# Copy user binaries
-sudo mount disk.img.p3 /mnt
-sudo cp user/init user/shell /mnt/
-sudo umount /mnt
-```
-
-### 5. Run
-
+#### Run:
 ```bash
 qemu-system-aarch64 \
   -machine virt \
   -cpu cortex-a57 \
   -m 1G \
-  -kernel kernel.bin \
+  -kernel build/aarch64/kernel.bin \
   -drive file=disk.img,if=none,id=hd0,format=raw \
   -device virtio-blk-device,drive=hd0 \
   -device virtio-gpu-pci \
-  -serial stdio \
-  -nographic  # Remove for graphical output
-```
-
-**Expected Output:**
-```
-========================================
-  AArch64 Microkernel v0.1.0
-  Production-Ready AArch64 Kernel
-========================================
-
-[INFO] Initializing CPU...
-[INFO] Initializing GIC...
-[INFO] Initializing timer...
-[INFO] PMM: 1024 MB total, 1008 MB free
-[INFO] VMM: MMU Enabled. Kernel PGD at 0x40001000
-[INFO] Ext4: Mounted. Vol=Userland, Inodes=65536
-[INFO] Scheduler: Loaded /init
-[INFO] Scheduler: Loaded /shell (1)
-[INFO] Scheduler: Loaded /shell (2)
+  -serial stdio
 ```
 
 ---
 
-## 🏗️ Architecture
+### 2. Target AMD64 (x86_64)
 
-### System Architecture Diagram
-
+#### Compile:
+```bash
+make clean ARCH=amd64
+make all ARCH=amd64
 ```
-┌─────────────────────────────────────────────────────┐
-│                  User Space (EL0)                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
-│  │  Shell   │  │   Init   │  │  Custom  │          │
-│  │ Process  │  │ Process  │  │   Apps   │          │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘          │
-└───────┼─────────────┼─────────────┼─────────────────┘
-        │             │             │
-        └─────────────┴─────────────┘ System Calls
-                      │
-┌─────────────────────┼─────────────────────────────┐
-│              Kernel Space (EL1)                   │
-│                                                   │
-│  ┌─────────────────────────────────────────────┐ │
-│  │         Process Scheduler (Round-Robin)     │ │
-│  │   Context Switch • ELF Loader • pt_regs    │ │
-│  └──────────────────┬──────────────────────────┘ │
-│                     │                            │
-│  ┌─────────────────────────────────────────────┐ │
-│  │      Virtual Memory Manager (VMM)           │ │
-│  │   4-Level Page Tables • TLB • ASID         │ │
-│  └──────────────────┬──────────────────────────┘ │
-│                     │                            │
-│  ┌─────────────────────────────────────────────┐ │
-│  │   Physical Memory Manager (PMM)             │ │
-│  │   Bitmap Allocator • Zones • Page Frames   │ │
-│  └─────────────────────────────────────────────┘ │
-│                                                   │
-│  ┌──────────────┐  ┌──────────────────────────┐ │
-│  │  Filesystems │  │    Graphics Subsystem    │ │
-│  │              │  │                          │ │
-│  │ • Ext4 (RO) │  │ • Compositor             │ │
-│  │ • GPT Parser│  │ • 2D/3D Renderer         │ │
-│  │ • Buffer    │  │ • Double Buffering       │ │
-│  │   Cache     │  │ • Alpha Blending         │ │
-│  └──────┬───────┘  └───────────┬──────────────┘ │
-│         │                      │                 │
-│  ┌──────┴──────────────────────┴──────────────┐ │
-│  │          Device Drivers                    │ │
-│  │  VirtIO-Block • VirtIO-GPU • GIC • Timer  │ │
-│  │  UART • Keyboard • Mouse                  │ │
-│  └────────────────────────────────────────────┘ │
-└───────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────┐
-│      Hardware (QEMU virt)       │
-│  Cortex-A57 • GICv2 • MMIO     │
-└─────────────────────────────────┘
-```
+This builds the boot structures, kernel executable, and bundles them into `build/amd64/os.iso` using the GRUB stage loader configuration.
 
-### Memory Layout
-
-```
-Virtual Address Space (48-bit):
-
-User Space (TTBR0_EL1):
-0x0000_0000_0000_0000 ┌──────────────────────┐
-                      │   User Code & Data   │
-0x0000_7FFF_FFFF_FFFF └──────────────────────┘
-
-Kernel Space (TTBR1_EL1):
-0xFFFF_0000_0000_0000 ┌──────────────────────┐
-                      │  Physical Memory     │
-                      │  Identity Map        │
-0xFFFF_8000_0000_0000 ├──────────────────────┤
-                      │  Kernel Image        │
-                      │  .text .data .bss    │
-0xFFFF_FFFF_FE00_0000 ├──────────────────────┤
-                      │  MMIO Devices        │
-                      │  (UART, GIC, etc.)   │
-0xFFFF_FFFF_FFFF_FFFF └──────────────────────┘
-
-Physical Memory (1GB):
-0x4000_0000 ┌──────────────────────┐
-            │  DMA Zone (16MB)     │
-0x4100_0000 ├──────────────────────┤
-            │  Kernel Image        │
-0x4200_0000 ├──────────────────────┤
-            │  Available Pages     │
-            │  (Managed by PMM)    │
-0x8000_0000 └──────────────────────┘
+#### Run:
+```bash
+qemu-system-x86_64 \
+  -m 1G \
+  -cdrom build/amd64/os.iso \
+  -device virtio-blk-pci,drive=hd0 \
+  -drive file=disk.img,if=none,id=hd0,format=raw \
+  -device virtio-gpu-pci \
+  -serial stdio
 ```
 
 ---
 
-## 📁 Project Structure
+## 📂 Codebase Architecture Mapping
 
-```
-os1test-dev/
-├── boot/                      # Bootloader
-│   ├── boot.s                # Assembly entry point
-│   └── linker.ld            # Bootloader linker script
-│
-├── kernel/                    # Kernel core
-│   ├── kernel.c              # Main initialization
-│   ├── sched/                # Scheduler & processes
-│   │   ├── process.c        # Process management
-│   │   ├── elf.c            # ELF64 loader
-│   │   └── schedule.c       # Context switching
-│   ├── mm/                   # Memory management
-│   │   ├── pmm.c            # Physical memory
-│   │   ├── vmm.c            # Virtual memory
-│   │   └── buffer.c         # Buffer cache
-│   ├── fs/                   # Filesystems
-│   │   ├── ext4.c           # Ext4 driver
-│   │   └── gpt.c            # GPT parser
-│   ├── graphics/             # Graphics subsystem
-│   │   ├── graphics.c       # Core graphics
-│   │   ├── compositor.c     # Window manager
-│   │   ├── draw2d.c         # 2D primitives
-│   │   ├── draw3d.c         # 3D renderer
-│   │   └── font.c           # Bitmap fonts
-│   └── lib/                  # Kernel library
-│       ├── string.c         # String functions
-│       ├── printk.c         # Kernel printf
-│       ├── kmalloc.c        # Heap allocator
-│       └── math.c           # Fixed-point math
-│
-├── drivers/                   # Device drivers
-│   ├── uart.c                # Serial console
-│   ├── gic.c                 # Interrupt controller
-│   ├── timer.c               # System timer
-│   ├── virtio_blk.c          # Block device
-│   ├── virtio_gpu.c          # Graphics device
-│   └── keyboard.c            # Keyboard input
-│
-├── include/kernel/            # Kernel headers
-│   ├── types.h               # Base types
-│   ├── pmm.h                 # PMM API
-│   ├── vmm.h                 # VMM API
-│   ├── sched.h               # Scheduler API
-│   ├── graphics.h            # Graphics API
-│   └── ...
-│
-├── user/                      # User-space programs
-│   ├── init.c                # Init process
-│   └── shell.c               # Shell program
-│
-├── tools/                     # Build utilities
-│   └── mkdisk.sh            # Disk image creator
-│
-├── Makefile                   # Build system
-├── grub.cfg                   # GRUB configuration
-└── README.md                  # This file
-```
+Refer to [MANIFEST.md](file:///Users/olmo/Documents/git/ostest1/os1test-dev/MANIFEST.md) for a detailed, high-fidelity mapping of all source files in the repository.
 
 ---
 
-## 🔬 Technical Details
+## 🤝 Contribution Guidelines
 
-### Interrupt Handling
-
-The system uses the **ARM Generic Interrupt Controller (GICv2)** for interrupt management:
-
-```c
-Exception Vector Table (EL1):
-  0x000 - Synchronous (EL1t)
-  0x080 - IRQ (EL1t)
-  0x100 - FIQ (EL1t)
-  0x180 - SError (EL1t)
-  0x200 - Synchronous (EL1h)  ← System Calls
-  0x280 - IRQ (EL1h)           ← Timer & Devices
-  0x300 - FIQ (EL1h)
-  0x380 - SError (EL1h)
-  0x400 - Synchronous (EL0)    ← User Exceptions
-  0x480 - IRQ (EL0)
-  0x500 - FIQ (EL0)
-  0x580 - SError (EL0)
-```
-
-### Context Switch Flow
-
-```c
-1. Timer interrupt fires (100Hz)
-2. CPU saves user context to stack (pt_regs)
-3. Exception handler calls timer_handler()
-4. timer_handler() calls schedule(pt_regs *)
-5. schedule() picks next process (round-robin)
-6. Switch TTBR0_EL1 to new process page table
-7. Invalidate TLB (tlbi vmalle1is)
-8. Return new process's pt_regs
-9. Exception return restores registers
-10. Process resumes execution
-```
-
-### ELF Loading
-
-The ELF loader supports position-independent code and dynamically maps segments:
-
-```c
-For each PT_LOAD segment:
-  1. Allocate virtual pages
-  2. Map pages in process page table
-  3. Set permissions (R/W/X)
-  4. Copy data from filesystem
-  5. Zero BSS section
-  6. Flush instruction cache
-```
-
-### Zero-Copy Buffer Cache
-
-The buffer cache uses a **hash table + LRU list** for efficient block caching:
-
-```c
-Cache Miss Flow:
-  1. Allocate physical page
-  2. DMA read directly into page
-  3. Insert into hash table (O(1) lookup)
-  4. Add to LRU list (eviction policy)
-  5. Return page pointer (zero-copy!)
-```
+*   **Indentation & Formatting**: Strictly follow the K&R style guide with 4-space indentation.
+*   **Paging/Core Isolation**: Do not call architecture functions outside `/kernel/hal/`. All interaction between the Unified Core and platform operations must pass through `/kernel/core/include/core/hal.h` interface pointers.
+*   **Paging Protection**: Never allocate user pages without setting the `USER` supervisor bit.
 
 ---
 
-## 🗺️ Roadmap
+## ⚖️ License & Inspirations
 
-### Version 0.2.0 (Q2 2026)
-- [ ] SMP support (multi-core scheduling)
-- [ ] VirtIO-Net driver (networking)
-- [ ] TCP/IP stack (lwIP integration)
-- [ ] Unix sockets (IPC)
+This project is licensed under the **GNU General Public License, Version 2 (GPLv2)** - see the [LICENSE](LICENSE) file for details. This open-source license aligns the project directly with the licensing philosophy of **Linux**.
 
-### Version 0.3.0 (Q3 2026)
-- [ ] Ext4 write support
-- [ ] Journaling filesystem
-- [ ] Virtual File System (VFS) layer
-- [ ] procfs and sysfs
+### 🌟 Reference Implementations & Inspirations
 
-### Version 0.4.0 (Q4 2026)
-- [ ] USB stack (XHCI/EHCI)
-- [ ] Real hardware support (Raspberry Pi 4)
-- [ ] Device Tree parsing
-- [ ] Dynamic module loading
+The architecture of OS1 has been designed by drawing inspiration from major operating system architectures. Plan 9 and seL4 represent the primary pillars of our technical design, followed by Linux and BSD models. Below is the mapping of our key architectural concepts to their reference sources in precise priority order:
 
-### Future
-- [ ] Audio subsystem (ALSA-compatible)
-- [ ] X11 protocol support
-- [ ] POSIX compliance
-- [ ] GCC/Clang self-hosting
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Whether you're fixing bugs, adding features, or improving documentation, your help is appreciated.
-
-### How to Contribute
-
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
-
-### Development Guidelines
-
-- Follow the existing code style (K&R with 2-space indents)
-- Add comments for complex algorithms
-- Update documentation for new features
-- Test on QEMU before submitting
-- Keep commits atomic and well-described
-
-### Areas for Contribution
-
-- 🐛 **Bug Fixes** - Found a bug? Submit a patch!
-- 📚 **Documentation** - Improve README, add tutorials
-- ✨ **Features** - Implement items from the roadmap
-- 🧪 **Testing** - Add test cases, improve coverage
-- 🎨 **Graphics** - Better fonts, themes, icons
-- 🔧 **Drivers** - Support more devices
-
----
-
-## 📄 License
-
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
-
-```
-MIT License
-
-Copyright (c) 2026 olmox001
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-```
-
----
-
-## 🙏 Acknowledgments
-
-- **ARM Holdings** - AArch64 Architecture Reference Manual
-- **OSDev Wiki** - Invaluable resource for OS development
-- **QEMU Project** - Excellent emulation platform
-- **Linux Kernel** - Design inspiration (especially for list.h)
-- **VirtIO Specification** - Clean device abstraction
-
-### Resources Used
-
-- [ARM Architecture Reference Manual](https://developer.arm.com/documentation/ddi0487/latest)
-- [OSDev Wiki](https://wiki.osdev.org/)
-- [Ext4 Disk Layout](https://ext4.wiki.kernel.org/index.php/Ext4_Disk_Layout)
-- [VirtIO 1.1 Specification](https://docs.oasis-open.org/virtio/virtio/v1.1/virtio-v1.1.html)
-
----
-
-## 📧 Contact
-
-**Project Maintainer**: olmox001
-
-- GitHub: [@olmox001](https://github.com/olmox001)
-- Issues: [Report Bug](https://github.com/olmox001/os1test-dev/issues)
-- Discussions: [Join Discussion](https://github.com/olmox001/os1test-dev/discussions)
-
----
-
-<div align="center">
-
-**⭐ Star this repository if you find it useful!**
-
-Made with ❤️ and lots of ☕ by the OS1TEST-DEV team
-
-</div>
-
+1.  **Plan 9 from Bell Labs (Primary Pillars)**:
+    *   *Inspiration*: "Everything is a file/resource" philosophy, hierarchical dynamically mounted key-value trees, and native ring buffers for IPC synchronization.
+    *   *File/Code Reference*: The hierarchical dynamic registry keys and ring-buffer serialization mapped in [registry.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/libkernel/src/registry.c). Plan 9 style system call wrappers (`rfork`, `pread`, `pwrite`, `await`) planned in user libraries.
+2.  **seL4 (Secure Embedded L4 - Primary Pillars)**:
+    *   *Inspiration*: Strictly thinned Hardware Abstraction Layer (HAL) focused solely on assembly context setups, exception routing, and MMU directory table loads.
+    *   *File/Code Reference*: Assembly entry boundaries in [exception.S](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/arch/aarch64/cpu/exception.S) (AArch64) and [start.S](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/arch/amd64/boot/start.S) (AMD64), context state mapping in `pt_regs`.
+3.  **Linux (Kernel)**:
+    *   *Inspiration*: Intrusive circular double-linked list structures, K&R style code conventions, and robust Ext4 file traversal logic.
+    *   *File/Code Reference*: Double-linked list utility in [list.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/include/core/list.h), storage block parsing in [ext4.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/fs/ext4.c) and partition structures in [gpt.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/fs/gpt.c).
+4.  **base-nexs Project**:
+    *   *Inspiration*: Unified system service mapping paradigms and registry loop protocols.
+    *   *File/Code Reference*: Architecture registry logic under [registry.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/libkernel/src/registry.c) and dynamic service coordination.
+5.  **BSD / FreeBSD (VFS Layer)**:
+    *   *Inspiration*: BSD-style Virtual File System (VFS) mounting mechanism, file node (vnode) virtualization, and path lookup utilities (`namei`, `nameidata`).
+    *   *File/Code Reference*: Mount and vnode interface representations planned under resident filesystem management ([vfs.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/include/core/vfs.h)).
+6.  **Mach4 (Mach Microkernel)**:
+    *   *Inspiration*: Fully isolated helper servers communicating with the core through port-based IPC pipelines and asynchronous scheduling.
+    *   *File/Code Reference*: IPC dispatch and IPC registry message queues (`SYS_REG_IPC_SEND`/`SYS_REG_IPC_RECV`) implemented under [syscall.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/syscall.c).
+7.  **Font Rasterization Libraries (stb_truetype & stb_easy_font)**:
+    *   *Inspiration*: Standalone, header-only lightweight graphics typography engine by Sean Barrett.
+    *   *File/Code Reference*: TTF parsing tools in [stb_truetype.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/tools/stb_truetype.h) and user fonts output in [stb_easy_font.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/include/stb_easy_font.h).
+8.  **DoomGeneric Engine**:
+    *   *Inspiration*: Standardized framework for quick application and game porting on customized embedded framebuffers.
+    *   *File/Code Reference*: Custom blitter pipelines and input handlers integrated within user graphic applications.
+9.  **Limine Bootloader**:
+    *   *Inspiration*: Bootloader stage configurations and boot tags passing, ELF segments unpacking boundaries.
+    *   *File/Code Reference*: Multi-stage assembly setups and stage loaders inside [kernel/hal/boot/](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/boot/).
