@@ -12,7 +12,7 @@
 #include <core/vmm.h>
 
 int process_load_elf(struct process *proc, const char *path) {
-  uint32_t ino = ext4_find_inode(path);
+  uint32_t ino = boot_fs_find_inode(path);
   if (ino == 0) {
     pr_err("ELF: File not found: %s\n", path);
     return -1;
@@ -20,7 +20,7 @@ int process_load_elf(struct process *proc, const char *path) {
 
   /* 1. Read ELF Header */
   Elf64_Ehdr ehdr;
-  if (ext4_read_inode(ino, 0, (uint8_t *)&ehdr, sizeof(ehdr)) != sizeof(ehdr)) {
+  if (boot_fs_read_inode(ino, 0, (uint8_t *)&ehdr, sizeof(ehdr)) != sizeof(ehdr)) {
     pr_err("%s", "ELF: Failed to read header\n");
     return -1;
   }
@@ -39,7 +39,7 @@ int process_load_elf(struct process *proc, const char *path) {
     Elf64_Phdr phdr;
     uint32_t ph_off = ehdr.e_phoff + (i * ehdr.e_phentsize);
 
-    if (ext4_read_inode(ino, ph_off, (uint8_t *)&phdr, sizeof(phdr)) !=
+    if (boot_fs_read_inode(ino, ph_off, (uint8_t *)&phdr, sizeof(phdr)) !=
         sizeof(phdr)) {
       pr_err("ELF: Failed to read PHDR %d\n", i);
       return -1;
@@ -113,8 +113,8 @@ int process_load_elf(struct process *proc, const char *path) {
           uint64_t offset_in_page = copy_start - page_start;
           uint64_t offset_in_file = phdr.p_offset + (copy_start - seg_vstart);
 
-          ext4_read_inode(ino, offset_in_file,
-                          (uint8_t *)kaddr + offset_in_page, copy_len);
+          boot_fs_read_inode(ino, offset_in_file,
+                             (uint8_t *)kaddr + offset_in_page, copy_len);
         }
 
         /* Clean DC to PoU and invalid IC for executable pages */

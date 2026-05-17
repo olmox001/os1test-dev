@@ -90,14 +90,14 @@ void kernel_main(uint64_t fdt_ptr) {
     extern void driver_console_init(void);
     driver_console_init();
 
+    /* 2. CPU vectors + per-CPU setup */
+    cpu_init();
+
     /* 1.5 Early platform init */
     extern void arch_platform_early_init(void);
     arch_platform_early_init();
 
     print_banner();
-
-    /* 2. CPU vectors + per-CPU setup */
-    cpu_init();
 
     /* 3. Memory management bootstrap */
     size_t count = 0;
@@ -109,11 +109,17 @@ void kernel_main(uint64_t fdt_ptr) {
 
     /* 4. IRQ + Timer */
     irq_init();
+    extern void irq_init_percpu(void);
+    irq_init_percpu();
     extern void driver_timer_init(void);
     driver_timer_init();
+    extern void timer_init_percpu(void);
+    timer_init_percpu();
 
     /* 5. Scheduler */
     process_init();
+    extern void smp_create_idle_task(uint32_t cpu_id);
+    smp_create_idle_task(0);
 
     /* 6. Registry (Phase 3 — hierarchical registry with IPC queues) */
     registry_init();

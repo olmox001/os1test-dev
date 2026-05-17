@@ -31,7 +31,7 @@ COMMON_FLAGS = -Wall -Wextra -Werror -Wshadow -Wwrite-strings \
 ifeq ($(ARCH), amd64)
     CROSS_COMPILE ?= x86_64-elf-
     KERNEL_DIR = kernel
-    BOOT_DIR   = boot/amd64
+    BOOT_DIR   = $(KERNEL_DIR)/hal/boot/amd64
     ARCH_DIR   = $(KERNEL_DIR)/hal/arch/amd64
     
     ARCH_CFLAGS = -DARCH_AMD64 -mno-red-zone -mcmodel=large
@@ -45,7 +45,7 @@ ifeq ($(ARCH), amd64)
 else
     CROSS_COMPILE ?= aarch64-none-elf-
     KERNEL_DIR = kernel
-    BOOT_DIR   = boot/aarch64
+    BOOT_DIR   = $(KERNEL_DIR)/hal/boot/aarch64
     ARCH_DIR   = $(KERNEL_DIR)/hal/arch/aarch64
     
     ARCH_CFLAGS = -DARCH_AARCH64 -mcpu=cortex-a57
@@ -80,7 +80,7 @@ USER_DIR   = user
 USER_SYS_DIR = $(USER_DIR)/sys
 USER_LIB_DIR = $(USER_SYS_DIR)/lib
 USER_BIN_DIR = $(USER_SYS_DIR)/bin
-USER_ARCH_DIR = $(USER_DIR)/arch/$(ARCH)
+USER_ARCH_DIR = $(KERNEL_DIR)/hal/user/arch/$(ARCH)
 INCLUDE    = -Ikernel/core/include -Ikernel/hal/include -Ikernel/hal/arch/$(ARCH)/include -Ikernel/libkernel/include -Iuser/sys/include
 
 # Output files
@@ -193,7 +193,8 @@ DRIVER_SOURCES = \
     $(KERNEL_DIR)/core/src/graphics/graphics.c \
     $(KERNEL_DIR)/core/src/graphics/region.c \
     $(KERNEL_DIR)/core/src/graphics/gl.c \
-    $(KERNEL_DIR)/core/src/graphics/font.c
+    $(KERNEL_DIR)/core/src/graphics/font.c \
+    $(KERNEL_DIR)/core/src/graphics/compositor.c
 
 KERN_C_SOURCES = $(HAL_SOURCES) $(LIBKERNEL_SOURCES) $(CORE_SOURCES) $(DRIVER_SOURCES)
 

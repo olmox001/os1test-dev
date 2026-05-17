@@ -189,6 +189,18 @@ struct pt_regs *syscall_handler(struct pt_regs *frame) {
     }
     pr_err("Exception Class: %s (0x%lx)\n", ec_name, ec);
 
+    /* Discriminating diagnostics: SPSR mode, TTBR0, and bytes at ELR */
+    pr_err("SPSR=0x%lx (M[3:0]=%lu EL%lu)\n",
+           frame->spsr, frame->spsr & 0xF, (frame->spsr >> 2) & 0x3);
+    pr_err("TTBR0=0x%lx proc->page_table=0x%lx\n",
+           arch_vmm_get_pgd(),
+           current_process ? (uint64_t)current_process->page_table : 0UL);
+    if (frame->elr >= 0x80000000UL && frame->elr < 0xC0000000UL) {
+        uint32_t *p = (uint32_t *)frame->elr;
+        pr_err("Bytes@ELR: [0]=0x%08x [-1]=0x%08x [+1]=0x%08x\n",
+               p[0], p[-1], p[1]);
+    }
+
     if (current_process) {
       pr_err("Terminating PID %d due to fatal exception\n",
              current_process->pid);

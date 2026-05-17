@@ -34,6 +34,15 @@ struct gpt_entry {
     uint16_t name[36];
 } __attribute__((packed));
 
+struct mbr_partition_entry {
+    uint8_t status;
+    uint8_t chs_start[3];
+    uint8_t type;
+    uint8_t chs_end[3];
+    uint32_t start_lba;
+    uint32_t sector_count;
+} __attribute__((packed));
+
 struct ext4_superblock {
     uint32_t s_inodes_count;
     uint32_t s_blocks_count_lo;
@@ -115,18 +124,39 @@ int boot_fs_init(void) {
 
     struct gpt_header *h = (struct gpt_header *)buf;
     if (h->signature != 0x5452415020494645ULL) {
-        pr_err("%s", "BootFS: Invalid GPT signature\n");
-        return -1;
+        pr_warn("BootFS: Invalid GPT signature, attempting MBR fallback...\n");
+        if (virtio_blk_read(buf, 0, 1) != 0) {
+            pr_err("BootFS: Failed to read MBR sector\n");
+            return -1;
+        }
+        if (buf[510] != 0x55 || buf[511] != 0xAA) {
+            pr_err("BootFS: Invalid MBR boot signature\n");
+            return -1;
+        }
+        struct mbr_partition_entry *e = (struct mbr_partition_entry *)(buf + 446);
+        bool found = false;
+        for (int i = 0; i < 4; i++) {
+            if (e[i].type == 0x83) { // Linux Native partition
+                data_part_lba = e[i].start_lba;
+                pr_info("BootFS: Found MBR Ext4 partition %d at LBA %ld\n", i + 1, data_part_lba);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            pr_err("BootFS: No Ext4 partition (0x83) found in MBR\n");
+            return -1;
+        }
+    } else {
+        /* Read partition entries (simplified: check first 4) */
+        uint64_t entry_lba = h->part_entry_lba;
+        if (virtio_blk_read(buf, entry_lba, 1) != 0) return -1;
+
+        struct gpt_entry *e = (struct gpt_entry *)buf;
+        /* We expect the 3rd partition (index 2) to be DATA */
+        data_part_lba = e[2].start_lba;
+        pr_info("BootFS: Found GPT Ext4 partition at LBA %ld\n", data_part_lba);
     }
-
-    /* Read partition entries (simplified: check first 4) */
-    uint64_t entry_lba = h->part_entry_lba;
-    if (virtio_blk_read(buf, entry_lba, 1) != 0) return -1;
-
-    struct gpt_entry *e = (struct gpt_entry *)buf;
-    /* We expect the 3rd partition (index 2) to be DATA */
-    data_part_lba = e[2].start_lba;
-    pr_info("BootFS: Data partition starts at LBA %ld\n", data_part_lba);
 
     /* Read Ext4 Superblock */
     uint8_t *sb_buf = kmalloc(1024);
@@ -167,7 +197,7 @@ static struct ext4_inode *get_inode(uint32_t ino) {
     return inode;
 }
 
-uint32_t ext4_find_inode(const char *path) {
+uint32_t boot_fs_find_inode(const char *path) {
     if (strcmp(path, "/") == 0) return 2;
     
     uint32_t current_ino = 2; // Root
@@ -207,7 +237,7 @@ uint32_t ext4_find_inode(const char *path) {
     return current_ino;
 }
 
-int ext4_read_inode(uint32_t ino, uint64_t offset, uint8_t *buf, uint32_t size) {
+int boot_fs_read_inode(uint32_t ino, uint64_t offset, uint8_t *buf, uint32_t size) {
     struct ext4_inode *inode = get_inode(ino);
     if (!inode) return -1;
     
@@ -216,11 +246,51 @@ int ext4_read_inode(uint32_t ino, uint64_t offset, uint8_t *buf, uint32_t size) 
     uint32_t bytes_read = 0;
     
     uint8_t *tmp_buf = kmalloc(block_size);
+    uint8_t *indirect_buf = kmalloc(block_size);
+    if (!tmp_buf || !indirect_buf) {
+        if (tmp_buf) kfree(tmp_buf);
+        if (indirect_buf) kfree(indirect_buf);
+        kfree(inode);
+        return -1;
+    }
+    
     for (uint32_t b = start_block; b < end_block; b++) {
-        /* Simplified: only direct blocks */
-        if (b >= 12) break; 
+        uint32_t phys_block = 0;
         
-        if (read_blocks(inode->i_block[b], tmp_buf, 1) != 0) break;
+        if (b < 12) {
+            phys_block = inode->i_block[b];
+        } else if (b < 12 + 1024) {
+            uint32_t indirect_blk_num = inode->i_block[12];
+            if (indirect_blk_num != 0) {
+                if (read_blocks(indirect_blk_num, indirect_buf, 1) == 0) {
+                    phys_block = ((uint32_t *)indirect_buf)[b - 12];
+                }
+            }
+        } else {
+            uint32_t d_idx = b - 12 - 1024;
+            uint32_t master_idx = d_idx / 1024;
+            uint32_t sub_idx = d_idx % 1024;
+            
+            uint32_t double_indir_blk = inode->i_block[13];
+            if (double_indir_blk != 0 && master_idx < 1024) {
+                if (read_blocks(double_indir_blk, indirect_buf, 1) == 0) {
+                    uint32_t sub_indir_blk = ((uint32_t *)indirect_buf)[master_idx];
+                    if (sub_indir_blk != 0) {
+                        if (read_blocks(sub_indir_blk, tmp_buf, 1) == 0) {
+                            phys_block = ((uint32_t *)tmp_buf)[sub_idx];
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (phys_block == 0) {
+            memset(tmp_buf, 0, block_size);
+        } else {
+            if (read_blocks(phys_block, tmp_buf, 1) != 0) {
+                memset(tmp_buf, 0, block_size);
+            }
+        }
         
         uint32_t block_off = (b == start_block) ? (offset % block_size) : 0;
         uint32_t to_copy = block_size - block_off;
@@ -231,16 +301,17 @@ int ext4_read_inode(uint32_t ino, uint64_t offset, uint8_t *buf, uint32_t size) 
     }
     
     kfree(tmp_buf);
+    kfree(indirect_buf);
     kfree(inode);
     return bytes_read;
 }
 
 /* List directory entries for path into buf (newline-separated names).
  * Returns number of bytes written or -1 on error. */
-int ext4_list_dir(const char *path, char *buf, size_t size) {
+int boot_fs_list_dir(const char *path, char *buf, size_t size) {
     if (!path || !buf || size == 0) return -1;
 
-    uint32_t ino = ext4_find_inode(path);
+    uint32_t ino = boot_fs_find_inode(path);
     if (!ino) return -1;
 
     struct ext4_inode *inode = get_inode(ino);

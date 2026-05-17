@@ -40,16 +40,7 @@ volatile uint32_t cpu_boot_ack = 0;
  * and are being refactored into user-space processes.
  */
 
-void compositor_update_mouse(int dx, int dy, int absolute) {
-    (void)dx; (void)dy; (void)absolute;
-}
-
-void compositor_handle_click(int button, int state) {
-    (void)button; (void)state;
-}
-
-void compositor_render(void) {
-}
+/* Compositor stubs compiled from compositor.c */
 
 /* VFS Stubs */
 long sys_open(const char *path, int flags, int mode) {
@@ -74,55 +65,7 @@ long sys_close(int fd) {
 
 /* Moved to boot_fs.c */
 
-void compositor_destroy_windows_by_pid(int pid) {
-    (void)pid;
-}
-
-int compositor_get_focus_pid(void) {
-    return -1;
-}
-
-void compositor_tick(void) {
-}
-
-/* Compositor stubs — will be replaced by user-space compositor IPC */
-
-int compositor_create_window(int x, int y, int w, int h,
-                             const char *title, int pid) {
-    (void)x; (void)y; (void)w; (void)h; (void)title; (void)pid;
-    return -1;
-}
-
-void compositor_destroy_window(int win_id)       { (void)win_id; }
-
-void compositor_draw_rect(int win_id, int x, int y, int w, int h,
-                          uint32_t color, int caller_pid) {
-    (void)win_id; (void)x; (void)y; (void)w; (void)h;
-    (void)color; (void)caller_pid;
-}
-
-void compositor_blit(int win_id, int x, int y, int w, int h,
-                     const uint32_t *buf, int caller_pid) {
-    (void)win_id; (void)x; (void)y; (void)w; (void)h;
-    (void)buf; (void)caller_pid;
-}
-
-void compositor_set_window_flags(int win_id, int flags) {
-    (void)win_id; (void)flags;
-}
-
-void compositor_window_write(int win_id, const char *buf, size_t count) {
-    /* Fall back to console when compositor is not running */
-    (void)win_id;
-    extern void uart_puts(const char *s);
-    (void)buf; (void)count;
-}
-
-int compositor_get_window_by_pid(int pid)  { (void)pid; return -1; }
-void compositor_move_window(int win_id, int x, int y) {
-    (void)win_id; (void)x; (void)y;
-}
-uint32_t *compositor_get_buffer(int win_id) { (void)win_id; return NULL; }
+/* Other compositor stubs compiled from compositor.c */
 
 /* Moved to syscall_proc.c */
 

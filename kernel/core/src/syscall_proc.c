@@ -13,10 +13,10 @@
 #include <libkernel/string.h>
 
 /* Extern from boot_fs.c */
-extern uint32_t ext4_find_inode(const char *path);
-extern int      ext4_read_inode(uint32_t ino, uint64_t offset,
+extern uint32_t boot_fs_find_inode(const char *path);
+extern int      boot_fs_read_inode(uint32_t ino, uint64_t offset,
                                 uint8_t *buf, uint32_t size);
-extern int      ext4_list_dir(const char *path, char *buf, size_t size);
+extern int      boot_fs_list_dir(const char *path, char *buf, size_t size);
 
 /* ================================================================
    Process Management
@@ -127,20 +127,20 @@ long sys_file_read(const char *path, void *buf, int size, int offset) {
         return -EFAULT;
 
     /* size == 0 → return file size (stat-like) */
-    uint32_t ino = ext4_find_inode(k_path);
+    uint32_t ino = boot_fs_find_inode(k_path);
     if (!ino) return -ENOENT;
 
     if (size == 0 || buf == NULL) {
         /* Return inode data size as a rough "file size" estimate */
         uint8_t tmp[4];
-        int r = ext4_read_inode(ino, 0, tmp, 4);
+        int r = boot_fs_read_inode(ino, 0, tmp, 4);
         return (r >= 0) ? 65536 : -1; /* Simplified: tell caller "file exists" */
     }
 
     uint8_t *k_buf = (uint8_t *)kmalloc((size_t)size);
     if (!k_buf) return -ENOMEM;
 
-    int bytes = ext4_read_inode(ino, (uint64_t)offset, k_buf, (uint32_t)size);
+    int bytes = boot_fs_read_inode(ino, (uint64_t)offset, k_buf, (uint32_t)size);
     if (bytes > 0)
         vmm_copy_to_user(buf, k_buf, (size_t)bytes);
 
@@ -161,7 +161,7 @@ long sys_list_dir(const char *path, char *buf, size_t size) {
     char *k_buf = (char *)kmalloc(size < 4096 ? size : 4096);
     if (!k_buf) return -ENOMEM;
 
-    int ret = ext4_list_dir(k_path, k_buf, size < 4096 ? size : 4096);
+    int ret = boot_fs_list_dir(k_path, k_buf, size < 4096 ? size : 4096);
     if (ret >= 0)
         vmm_copy_to_user(buf, k_buf, (size_t)(ret + 1));
 
@@ -178,7 +178,7 @@ long sys_chdir(const char *path) {
 
     /* Verify it's a valid directory by finding its inode */
     if (k_path[0] != '\0' && strcmp(k_path, "/") != 0) {
-        uint32_t ino = ext4_find_inode(k_path);
+        uint32_t ino = boot_fs_find_inode(k_path);
         if (!ino) return -ENOENT;
     }
 
