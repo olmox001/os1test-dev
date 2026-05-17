@@ -86,13 +86,13 @@ This manifest documents the complete, clean directory structure of the **OS1 Mic
     *   [kernel.ld](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/arch/amd64/kernel.ld): AMD64 linker script.
 *   **Drivers Layer** (`kernel/hal/drivers/`):
     *   [console.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/console.c): Generic screen print router.
-    *   [uart/pl011.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/uart/pl011.c): AArch64 serial UART driver.
-    *   [uart/16550.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/uart/16550.c): AMD64 serial COM driver.
-    *   [gic/gic.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/gic/gic.c): AArch64 Generic Interrupt Controller driver.
-    *   [timer/pic_pit.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/timer/pic_pit.c): AMD64 8253 PIT timer.
-    *   [virtio/virtio_blk.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/virtio/virtio_blk.c): VirtIO-Block device driver.
-    *   [virtio/virtio_input.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/virtio/virtio_input.c): VirtIO Keyboard/Mouse events wrapper.
-    *   [gpu/virtio_gpu.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/gpu/virtio_gpu.c): VirtIO-GPU 2D/3D framebuffer management.
+    *   [pl011.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/mmio/uart/pl011.c): AArch64 serial UART MMIO driver.
+    *   [16550.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/mmio/uart/16550.c): AMD64 serial COM MMIO driver.
+    *   [gic.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/mmio/gic/gic.c): AArch64 Generic Interrupt Controller driver.
+    *   [pic_pit.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/mmio/timer/pic_pit.c): AMD64 8253 PIT timer.
+    *   [virtio_blk.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/pci/storage/virtio_blk.c): VirtIO-Block PCI storage device driver.
+    *   [virtio_input.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/pci/input/virtio_input.c): VirtIO Keyboard/Mouse PCI input events wrapper.
+    *   [virtio_gpu.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/drivers/pci/graphics/virtio_gpu.c): VirtIO-GPU PCI 2D/3D framebuffer management.
 *   **Relocated User Startup** (`kernel/hal/user/`):
     *   [init_asm.S](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/user/init_asm.S): Userland process start entry frame.
     *   [arch/aarch64/syscall.S](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/user/arch/aarch64/syscall.S): AArch64 assembly user syscall trampolines.
@@ -109,7 +109,7 @@ This manifest documents the complete, clean directory structure of the **OS1 Mic
 *   **System Daemons** (`user/sys/bin/`):
     *   [init.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/bin/init.c): PID 2 init orchestration manager.
     *   [notification_server.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/bin/notification_server.c): Graphic notifications popup process.
-    *   [shell.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/bin/shell.c): Interactive terminal environment shell.
+    *   [shell.c](file:///Users/olmo/Documents/git/ostest1/user/sys/bin/shell.c): Interactive terminal environment shell.
     *   [regedit.c](file:///Users/olmo/Documents/git/ostest1/user/sys/bin/regedit.c): Registry editor viewer utility.
 *   **Standard Library Core** (`user/sys/lib/`):
     *   [malloc.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/lib/malloc.c): Userland allocator wrapper.

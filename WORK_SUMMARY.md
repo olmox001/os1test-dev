@@ -24,7 +24,7 @@ We eliminated critical runtime instability blocks, completed physical file clean
     *   `boot/aarch64/` and `boot/amd64/` ➔ [kernel/hal/boot/](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/boot/)
     *   `user/arch/` and `user/init_asm.S` ➔ [kernel/hal/user/](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/user/)
 *   **Assembly Cleanup**: Tracked and deleted the obsolete assembly file `user/sys/lib/syscall.S` via `git rm` to maintain a completely clean user library space.
-*   **Logical Centralization**: Moved high-level MMU allocation loops, registry queues, and global boot descriptors from architecture folders directly into [kernel/core/](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/kernel/core/) or [kernel/libkernel/](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/libkernel/).
+*   **Logical Centralization**: Moved high-level MMU allocation loops, registry queues, and global boot descriptors from architecture folders directly into [kernel/core/](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/) or [kernel/libkernel/](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/libkernel/).
 
 ### 2. Resolving AMD64 Boot Loop & Triple Faults (Phase 6)
 *   **The Issue**: During AMD64 direct boots, the platform encountered silent CPU resets and reboot loops (triple faults) directly after early initialization.
@@ -34,6 +34,10 @@ We eliminated critical runtime instability blocks, completed physical file clean
 ### 3. Integrating Master Boot Record (MBR) Fallback (Phase 6)
 *   **The Issue**: Booting AMD64 via the release ISO image (`make test-release ARCH=amd64`) loaded via GRUB failed to find userland partitions because hybrid CD-ROM emulation strips GPT tables.
 *   **The Fix**: Implemented a robust partition scanner inside [boot_fs.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/boot_fs.c). If no GPT partition headers are detected, the kernel automatically falls back to parsing the classical Master Boot Record (MBR) block structure. It scans the partition table for a Linux Native Partition (type `0x83`), extracts the block offsets, and successfully mounts the Ext4 filesystem.
+
+### 4. Strict Include Segregation & Namespace Protection (Phase 4 Early Alignment)
+*   **The Issue**: The kernel ELF loader [elf.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/sched/elf.c) relied on `elf.h` from `user/sys/include/`, causing a boundary violation where the supervisor kernel depended directly on userland API definitions.
+*   **The Fix**: Rewrote the kernel's dedicated header [elf.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/include/core/elf.h) to be 100% self-contained and architecture-agnostic. It now compiles using only [libkernel/types.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/libkernel/include/libkernel/types.h), preventing namespace leakage and ensuring robust boundaries between kernel-space and user-space.
 
 ---
 
