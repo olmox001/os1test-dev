@@ -214,3 +214,54 @@ int virtio_blk_write(void *buf, uint64_t sector, uint32_t count) {
   }
   return 0;
 }
+
+/* Phase 2: Message-Based Driver Dispatch Implementation */
+#include <core/drivers.h>
+#include <core/ipc.h>
+
+static int virtio_blk_dispatch(const struct reg_msg *msg, struct reg_msg *reply) {
+  if (!msg || !reply)
+    return -1;
+
+  reply->from = 0; /* Kernel */
+  reply->type = REG_MSG_NAK;
+  reply->d0 = 0;
+  reply->d1 = 0;
+
+  switch (msg->type) {
+    case REG_MSG_BLK_READ: {
+      /* d0 = sector number, d1 = sector count. Buffer pointer is passed in msg->payload */
+      void **pbuf = (void **)msg->payload;
+      if (pbuf && *pbuf) {
+        if (virtio_blk_read(*pbuf, msg->d0, (uint32_t)msg->d1) == 0) {
+          reply->type = REG_MSG_ACK;
+        }
+      }
+      break;
+    }
+    case REG_MSG_BLK_WRITE: {
+      /* d0 = sector number, d1 = sector count. Buffer pointer is passed in msg->payload */
+      void **pbuf = (void **)msg->payload;
+      if (pbuf && *pbuf) {
+        if (virtio_blk_write(*pbuf, msg->d0, (uint32_t)msg->d1) == 0) {
+          reply->type = REG_MSG_ACK;
+        }
+      }
+      break;
+    }
+    default:
+      return -1;
+  }
+  return 0;
+}
+
+static struct hw_driver virtio_blk_driver = {
+  .name = "virtio-blk",
+  .init = NULL, /* Pre-initialized during early boot */
+  .dispatch = virtio_blk_dispatch
+};
+
+void virtio_blk_driver_register(void) {
+  driver_register(&virtio_blk_driver);
+}
+

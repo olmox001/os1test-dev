@@ -24,37 +24,48 @@ OS1TEST-DEV implements a strictly thinned **Three-Tier Architecture** that guara
 │       │                 │                     │          │
 │       └─────────┬───────┴──────────┬──────────┘          │
 └─────────────────┼──────────────────┼─────────────────────┘
-                  │ IPC (Registry)   │ Syscalls
+                  │ Syscalls         │ Syscalls
 ┌─────────────────▼──────────────────▼─────────────────────┐
 │                    KERNEL CORE (EL1)                     │
 │                                                          │
-│    ┌──────────────┐ ┌───────────────┐ ┌──────────────┐   │
-│    │  Scheduler   │ │  Compositor   │ │   VFS/Ext4   │   │
-│    │ (Round-Robin)│ │(Overlap/Alpha)│ │(LRU Cache/GPT)   │   │
-│    └──────┬───────┘ └───────┬───────┘ └──────┬───────┘   │
-└───────────┼─────────────────┼────────────────┼───────────┘
-            │ Abstraction     │ Abstraction    │ Abstraction
-┌───────────▼─────────────────▼────────────────▼───────────┐
-│                HAL (Platform Layer / Drivers)            │
+│    ┌────────────────────────────────────────────────┐    │
+│    │             High-Level Subsystems              │    │
+│    │  [VFS / Ext4]    [Window Compositor]  [Network]│    │
+│    └────────────────────────┬───────────────────────┘    │
+│                             │                            │
+│    ┌────────────────────────▼───────────────────────┐    │
+│    │          IPC / Registry / Message Bus          │    │
+│    │   (Dynamic Registry Tree, Message Dispatch)    │    │
+│    └────────────────────────┬───────────────────────┘    │
+│                             │                            │
+│    ┌────────────────────────▼───────────────────────┐    │
+│    │                  Scheduler                     │    │
+│    │           (Preemptive Round-Robin)             │    │
+│    └────────────────────────────────────────────────┘    │
+└─────────────────────────────┬────────────────────────────┘
+                              │ Abstraction Layer (HAL)
+┌─────────────────────────────▼────────────────────────────┐
+│                    HAL & DRIVER LAYER                    │
 │                                                          │
-│    ┌──────────────┐ ┌───────────────┐ ┌──────────────┐   │
-│    │   AArch64    │ │     AMD64     │ │   Drivers    │   │
-│    │(MMU, Vectors)│ │(GDT,IDT,APIC) │ │(VirtIO, GIC) │   │
-│    └──────────────┘ └───────────────┘ └──────────────┘   │
+│       ┌──────────────────┐         ┌──────────────┐      │
+│       │ Architecture HAL │         │   Drivers    │      │
+│       │ (AArch64/AMD64)  │         │ (VirtIO,GIC) │      │
+│       └──────────────────┘         └──────────────┘      │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ### 1. Thinned HAL (Hardware Abstraction Layer)
 To maximize security and clean up platform isolation, all high-level logic is moved out of architecture directories into the unified kernel core. The HAL is limited strictly to assembly vector traps, interrupt controls (`cli`/`sti`, `cpsid`/`cpsie`), architecture context structures (`pt_regs`), and direct MMIO character UART routines.
 
-### 2. Unified Kernel Core
+### 2. Unified Kernel Core & High-Level Subsystems
 The main OS1 microkernel coordinates:
 *   **Virtual Memory isolation**: Thread-safe virtual page mapping and translation table generation.
 *   **Preemptive Task Scheduling**: Preemption driven by clock ticks via GICv2 on AArch64 and PIT on AMD64.
-*   **Resident VFS & Graphics Compositor**: Kept inside the kernel core to ensure ultra-high-speed alpha blending, hardware-accelerated double buffering, and zero-copy Ext4 partition traversal.
+*   **Resident VFS, Graphics Compositor & Future Network Stack**: Run as high-performance microkernel services, fully utilizing the underlying zero-copy buffers.
 
-### 3. Plan 9 Style Registry System
-Hardcoded magic memory addresses, interrupt vectors, and hardware constants are strictly prohibited in the core logic. At boot, the bootloader or Flat Device Tree (FDT) parser registers all peripherals under the dynamic hierarchical key-value registry `/sys/registry`. Subsystems query registry nodes dynamically to fetch configuration attributes.
+### 3. Foundational IPC & Plan 9 Style Registry System
+Registry, message dispatches, and ports form the foundational communication layer *underneath* all high-level services. Hardcoded magic memory addresses, interrupt vectors, and hardware constants are strictly prohibited. At boot, the Flat Device Tree (FDT) parser registers all peripherals under the dynamic hierarchical key-value registry `/sys/registry`. Subsystems query registry nodes dynamically to fetch configuration attributes, routing block and character data through the unified port-based asynchronous message queue.
+
 
 ---
 
@@ -156,7 +167,7 @@ qemu-system-x86_64 \
 
 ## 📂 Codebase Architecture Mapping
 
-Refer to [MANIFEST.md](file:///Users/olmo/Documents/git/ostest1/os1test-dev/MANIFEST.md) for a detailed, high-fidelity mapping of all source files in the repository.
+Refer to [MANIFEST.md]) for a detailed, high-fidelity mapping of all source files in the repository.
 
 ---
 
@@ -178,28 +189,25 @@ The architecture of OS1 has been designed by drawing inspiration from major oper
 
 1.  **Plan 9 from Bell Labs (Primary Pillars)**:
     *   *Inspiration*: "Everything is a file/resource" philosophy, hierarchical dynamically mounted key-value trees, and native ring buffers for IPC synchronization.
-    *   *File/Code Reference*: The hierarchical dynamic registry keys and ring-buffer serialization mapped in [registry.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/libkernel/src/registry.c). Plan 9 style system call wrappers (`rfork`, `pread`, `pwrite`, `await`) planned in user libraries.
+    *   *File/Code Reference*: The hierarchical dynamic registry keys and ring-buffer serialization mapped in [registry.c](https://github.com/plan9foundation/plan9). Plan 9 style system call wrappers (`rfork`, `pread`, `pwrite`, `await`) planned in user libraries.
 2.  **seL4 (Secure Embedded L4 - Primary Pillars)**:
     *   *Inspiration*: Strictly thinned Hardware Abstraction Layer (HAL) focused solely on assembly context setups, exception routing, and MMU directory table loads.
-    *   *File/Code Reference*: Assembly entry boundaries in [exception.S](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/arch/aarch64/cpu/exception.S) (AArch64) and [start.S](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/arch/amd64/boot/start.S) (AMD64), context state mapping in `pt_regs`.
+    *   *File/Code Reference*: Assembly entry boundaries in [exception.S] (AArch64) and [start.S] (AMD64), context state mapping in `pt_regs`. (https://github.com/SEL4/sel4)
 3.  **Linux (Kernel)**:
     *   *Inspiration*: Intrusive circular double-linked list structures, K&R style code conventions, and robust Ext4 file traversal logic.
-    *   *File/Code Reference*: Double-linked list utility in [list.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/include/core/list.h), storage block parsing in [ext4.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/fs/ext4.c) and partition structures in [gpt.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/fs/gpt.c).
+    *   *File/Code Reference*: Double-linked list utility in [list.h], storage block parsing in [ext4.c] and partition structures in [gpt.c]   (https://github.com/torvalds/linux.)
 4.  **base-nexs Project**:
     *   *Inspiration*: Unified system service mapping paradigms and registry loop protocols.
-    *   *File/Code Reference*: Architecture registry logic under [registry.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/libkernel/src/registry.c) and dynamic service coordination.
+    *   *File/Code Reference*: Architecture registry logic under [registry.c](https://github.com/olmox001/base-nexs/tree/dev-stable) and dynamic service coordination.
 5.  **BSD / FreeBSD (VFS Layer)**:
     *   *Inspiration*: BSD-style Virtual File System (VFS) mounting mechanism, file node (vnode) virtualization, and path lookup utilities (`namei`, `nameidata`).
-    *   *File/Code Reference*: Mount and vnode interface representations planned under resident filesystem management ([vfs.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/include/core/vfs.h)).
+    *   *File/Code Reference*: Mount and vnode interface representations planned under resident filesystem management ([vfs.h](https://github.com/freebsd/freebsd-src)).
 6.  **Mach4 (Mach Microkernel)**:
     *   *Inspiration*: Fully isolated helper servers communicating with the core through port-based IPC pipelines and asynchronous scheduling.
-    *   *File/Code Reference*: IPC dispatch and IPC registry message queues (`SYS_REG_IPC_SEND`/`SYS_REG_IPC_RECV`) implemented under [syscall.c](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/core/src/syscall.c).
+    *   *File/Code Reference*: IPC dispatch and IPC registry message queues (`SYS_REG_IPC_SEND`/`SYS_REG_IPC_RECV`) implemented under [syscall.c](https://github.com/openmach/mach4).
 7.  **Font Rasterization Libraries (stb_truetype & stb_easy_font)**:
     *   *Inspiration*: Standalone, header-only lightweight graphics typography engine by Sean Barrett.
-    *   *File/Code Reference*: TTF parsing tools in [stb_truetype.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/tools/stb_truetype.h) and user fonts output in [stb_easy_font.h](file:///Users/olmo/Documents/git/ostest1/os1test-dev/user/sys/include/stb_easy_font.h).
-8.  **DoomGeneric Engine**:
-    *   *Inspiration*: Standardized framework for quick application and game porting on customized embedded framebuffers.
-    *   *File/Code Reference*: Custom blitter pipelines and input handlers integrated within user graphic applications.
+    *   *File/Code Reference*: TTF parsing tools in [stb_truetype.h] and user fonts output in [stb_easy_font.h](https://github.com/nothings/stb/tree/master).
 9.  **Limine Bootloader**:
     *   *Inspiration*: Bootloader stage configurations and boot tags passing, ELF segments unpacking boundaries.
-    *   *File/Code Reference*: Multi-stage assembly setups and stage loaders inside [kernel/hal/boot/](file:///Users/olmo/Documents/git/ostest1/os1test-dev/kernel/hal/boot/).
+    *   *File/Code Reference*: Multi-stage assembly setups and stage loaders inside [kernel/hal/boot/](https://github.com/limine-bootloader/limine).

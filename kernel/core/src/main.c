@@ -14,6 +14,7 @@
 #include <core/fdt.h>
 #include <core/boot_fs.h>
 #include <core/registry.h>
+#include <core/drivers.h>
 
 #define OS1_VERSION_STR "0.2.0-micro"
 
@@ -44,6 +45,7 @@ static void register_drivers(void) {
     registry_set("sys/drivers/uart/type",    "16550");
     registry_set("sys/drivers/uart/status",  "active");
     reg_ipc_init_queue("sys/drivers/uart/cmd");
+    uart_16550_driver_register();
 
     registry_set("sys/drivers/pic/type",     "PIC-PIT");
     registry_set("sys/drivers/pic/status",   "active");
@@ -55,6 +57,7 @@ static void register_drivers(void) {
     registry_set("sys/drivers/uart/type",    "PL011");
     registry_set("sys/drivers/uart/status",  "active");
     reg_ipc_init_queue("sys/drivers/uart/cmd");
+    pl011_driver_register();
 
     registry_set("sys/drivers/gic/type",     "GICv2");
     registry_set("sys/drivers/gic/status",   "active");
@@ -66,6 +69,7 @@ static void register_drivers(void) {
     registry_set("sys/drivers/virtio-blk/type",   "VirtIO-BLK");
     registry_set("sys/drivers/virtio-blk/status", "active");
     reg_ipc_init_queue("sys/drivers/virtio-blk/cmd");
+    virtio_blk_driver_register();
 
     registry_set("sys/drivers/virtio-gpu/type",   "VirtIO-GPU");
     registry_set("sys/drivers/virtio-gpu/status", "active");

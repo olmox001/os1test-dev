@@ -94,3 +94,66 @@ void uart_puthex(uint64_t val) {
   uart_puts("0x");
   uart_puts(buf);
 }
+
+/* Phase 2: Message-Based Driver Dispatch Implementation */
+#include <core/drivers.h>
+#include <core/ipc.h>
+
+static int uart_16550_dispatch(const struct reg_msg *msg, struct reg_msg *reply) {
+  if (!msg || !reply)
+    return -1;
+
+  reply->from = 0; /* Kernel */
+  reply->type = REG_MSG_NAK;
+  reply->d0 = 0;
+  reply->d1 = 0;
+
+  switch (msg->type) {
+    case REG_MSG_MMIO_WRITE: {
+      if (msg->d1 > 0) {
+        /* Message d1 holds length; treat d0 as a pointer to string */
+        const char *s = (const char *)msg->d0;
+        if (s) {
+          uart_puts(s);
+          reply->type = REG_MSG_ACK;
+        }
+      } else {
+        /* Treat d0 as a single character */
+        uart_putc((char)msg->d0);
+        reply->type = REG_MSG_ACK;
+      }
+      break;
+    }
+    case REG_MSG_MMIO_READ: {
+      if (msg->d1 == 0) {
+        /* Blocking read */
+        reply->d0 = (uint64_t)uart_getc();
+        reply->type = REG_MSG_ACK;
+      } else {
+        /* Non-blocking read */
+        int c = uart_getc_nonblock();
+        if (c >= 0) {
+          reply->d0 = (uint64_t)c;
+          reply->type = REG_MSG_ACK;
+        } else {
+          reply->type = REG_MSG_NAK;
+        }
+      }
+      break;
+    }
+    default:
+      return -1;
+  }
+  return 0;
+}
+
+static struct hw_driver uart_16550_driver = {
+  .name = "uart",
+  .init = NULL, /* Pre-initialized during early boot */
+  .dispatch = uart_16550_dispatch
+};
+
+void uart_16550_driver_register(void) {
+  driver_register(&uart_16550_driver);
+}
+

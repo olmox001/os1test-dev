@@ -130,12 +130,12 @@ HAL_SOURCES = \
     $(ARCH_DIR)/cpu/apic.c \
     $(ARCH_DIR)/mm/mmu.c \
     $(ARCH_DIR)/mm/uaccess.c \
-    $(KERNEL_DIR)/hal/drivers/uart/16550.c \
-    $(KERNEL_DIR)/hal/drivers/timer/pic_pit.c \
+    $(KERNEL_DIR)/hal/drivers/mmio/uart/16550.c \
+    $(KERNEL_DIR)/hal/drivers/mmio/timer/pic_pit.c \
     $(ARCH_DIR)/platform/platform.c \
     $(ARCH_DIR)/hal.c \
     $(ARCH_DIR)/virtio.c \
-    $(KERNEL_DIR)/hal/drivers/pci/pci.c \
+    $(KERNEL_DIR)/hal/drivers/pci/core/pci.c \
     $(KERNEL_DIR)/hal/src/bus.c
 else
 HAL_SOURCES = \
@@ -145,9 +145,9 @@ HAL_SOURCES = \
     $(ARCH_DIR)/platform.c \
     $(ARCH_DIR)/hal.c \
     $(ARCH_DIR)/virtio.c \
-    $(KERNEL_DIR)/hal/drivers/uart/pl011.c \
-    $(KERNEL_DIR)/hal/drivers/gic/gic.c \
-    $(KERNEL_DIR)/hal/drivers/timer/timer.c \
+    $(KERNEL_DIR)/hal/drivers/mmio/uart/pl011.c \
+    $(KERNEL_DIR)/hal/drivers/mmio/gic/gic.c \
+    $(KERNEL_DIR)/hal/drivers/mmio/timer/timer.c \
     $(KERNEL_DIR)/hal/src/bus.c
 endif
 
@@ -178,18 +178,20 @@ CORE_SOURCES = \
     $(KERNEL_DIR)/hal/src/mm/vmm.c \
     $(KERNEL_DIR)/hal/src/mm/buffer.c \
     $(KERNEL_DIR)/hal/src/irq/irq.c \
-    $(KERNEL_DIR)/core/src/cpu.c
+    $(KERNEL_DIR)/core/src/cpu.c \
+    $(KERNEL_DIR)/core/src/drivers.c
+
 
 # --- Legacy Drivers (To be moved to user-space) ---
 DRIVER_SOURCES = \
     $(KERNEL_DIR)/hal/drivers/console.c \
     $(KERNEL_DIR)/hal/drivers/irq_ctrl.c \
     $(KERNEL_DIR)/hal/drivers/sys_timer.c \
-    $(KERNEL_DIR)/hal/drivers/virtio/virtio_blk.c \
-    $(KERNEL_DIR)/hal/drivers/virtio/virtio_input.c \
-    $(KERNEL_DIR)/hal/drivers/gpu/virtio_gpu.c \
-    $(KERNEL_DIR)/hal/drivers/gpu/gpu_core.c \
-    $(KERNEL_DIR)/hal/drivers/keyboard/keyboard.c \
+    $(KERNEL_DIR)/hal/drivers/pci/storage/virtio_blk.c \
+    $(KERNEL_DIR)/hal/drivers/pci/input/virtio_input.c \
+    $(KERNEL_DIR)/hal/drivers/pci/graphics/virtio_gpu.c \
+    $(KERNEL_DIR)/hal/drivers/pci/graphics/gpu_core.c \
+    $(KERNEL_DIR)/hal/drivers/pci/input/keyboard.c \
     $(KERNEL_DIR)/core/src/graphics/graphics.c \
     $(KERNEL_DIR)/core/src/graphics/region.c \
     $(KERNEL_DIR)/core/src/graphics/gl.c \
@@ -240,13 +242,13 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core/src/graphics
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/src/mm
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/src/irq
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/uart
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/gic
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/timer
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/virtio
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/gpu
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/keyboard
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/pci
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/mmio/uart
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/mmio/gic
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/mmio/timer
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/pci/core
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/pci/storage
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/pci/graphics
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/pci/input
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/libkernel/src
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/lib
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/sys/lib
