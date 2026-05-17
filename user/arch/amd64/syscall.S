@@ -204,3 +204,28 @@ _sys_getcwd:
     movq $256, %rax
     syscall
     ret
+
+/* Registry IPC queue syscalls */
+.global _sys_reg_ipc_send
+_sys_reg_ipc_send:
+    movq $260, %rax
+    syscall
+    ret
+
+.global _sys_reg_ipc_recv
+_sys_reg_ipc_recv:
+    movq $261, %rax
+    syscall
+    ret
+
+.global _sys_reg_ipc_pend
+_sys_reg_ipc_pend:
+    movq $262, %rax
+    syscall
+    ret
+
+.global _sys_reg_list
+_sys_reg_list:
+    movq $263, %rax
+    syscall
+    ret

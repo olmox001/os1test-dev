@@ -20,8 +20,8 @@ else ifeq ($(findstring amd64,$(ARCH)),amd64)
 endif
 
 # Common Compiler Flags
-COMMON_FLAGS = -Wall -Wextra -Werror -Wpedantic -Wshadow -Wwrite-strings \
-               -Wmissing-prototypes -Wstrict-prototypes \
+COMMON_FLAGS = -Wall -Wextra -Werror -Wshadow -Wwrite-strings \
+               -Wmissing-prototypes -Wstrict-prototypes -std=gnu11 \
                -ffreestanding -fno-builtin -nostdlib -nostartfiles \
                -fno-common -fstack-protector-strong \
                -fno-pic -fno-pie \
@@ -32,7 +32,7 @@ ifeq ($(ARCH), amd64)
     CROSS_COMPILE ?= x86_64-elf-
     KERNEL_DIR = kernel
     BOOT_DIR   = boot/amd64
-    ARCH_DIR   = $(KERNEL_DIR)/arch/amd64
+    ARCH_DIR   = $(KERNEL_DIR)/hal/arch/amd64
     
     ARCH_CFLAGS = -DARCH_AMD64 -mno-red-zone -mcmodel=large
     ASFLAGS = -g --fatal-warnings
@@ -46,7 +46,7 @@ else
     CROSS_COMPILE ?= aarch64-none-elf-
     KERNEL_DIR = kernel
     BOOT_DIR   = boot/aarch64
-    ARCH_DIR   = $(KERNEL_DIR)/arch/aarch64
+    ARCH_DIR   = $(KERNEL_DIR)/hal/arch/aarch64
     
     ARCH_CFLAGS = -DARCH_AARCH64 -mcpu=cortex-a57
     ASFLAGS = -mcpu=cortex-a57 -g --fatal-warnings
@@ -81,7 +81,7 @@ USER_SYS_DIR = $(USER_DIR)/sys
 USER_LIB_DIR = $(USER_SYS_DIR)/lib
 USER_BIN_DIR = $(USER_SYS_DIR)/bin
 USER_ARCH_DIR = $(USER_DIR)/arch/$(ARCH)
-INCLUDE    = -I$(KERNEL_DIR)/include -I$(ARCH_DIR)/include -Iinclude/api
+INCLUDE    = -Ikernel/core/include -Ikernel/hal/include -Ikernel/hal/arch/$(ARCH)/include -Ikernel/libkernel/include -Iuser/sys/include
 
 # Output files
 BOOTLOADER_ELF = $(BUILD_DIR)/bootloader.elf
@@ -95,6 +95,7 @@ DISK_IMG   = $(BUILD_DIR)/disk.img
 # Source Files
 # ==============================================================================
 
+# --- Boot & Assembly Sources ---
 ifeq ($(ARCH), amd64)
 BOOT_SOURCES = \
     $(BOOT_DIR)/header.S \
@@ -107,22 +108,6 @@ KERN_ASM_SOURCES = \
     $(ARCH_DIR)/cpu/syscall.S \
     $(ARCH_DIR)/cpu/context.S \
     $(ARCH_DIR)/boot/trampoline.S
-
-KERN_C_SOURCES = \
-    $(ARCH_DIR)/cpu/cpu.c \
-    $(ARCH_DIR)/cpu/idt.c \
-    $(ARCH_DIR)/cpu/gdt.c \
-    $(ARCH_DIR)/cpu/msr.c \
-    $(ARCH_DIR)/cpu/syscall_hal.c \
-    $(ARCH_DIR)/cpu/apic.c \
-    $(ARCH_DIR)/mm/mmu.c \
-    $(ARCH_DIR)/mm/uaccess.c \
-    $(KERNEL_DIR)/drivers/uart/16550.c \
-    $(KERNEL_DIR)/drivers/timer/pic_pit.c \
-    $(ARCH_DIR)/platform/platform.c \
-    $(ARCH_DIR)/hal.c \
-    $(ARCH_DIR)/virtio.c \
-    $(KERNEL_DIR)/drivers/pci/pci.c
 else
 BOOT_SOURCES = \
     $(BOOT_DIR)/header.S \
@@ -132,62 +117,88 @@ BOOT_SOURCES = \
 KERN_ASM_SOURCES = \
     $(ARCH_DIR)/boot/start.S \
     $(ARCH_DIR)/cpu/exception.S
+endif
 
-KERN_C_SOURCES = \
+# --- HAL Sources (Architecture-Specific) ---
+ifeq ($(ARCH), amd64)
+HAL_SOURCES = \
+    $(ARCH_DIR)/cpu/cpu.c \
+    $(ARCH_DIR)/cpu/idt.c \
+    $(ARCH_DIR)/cpu/gdt.c \
+    $(ARCH_DIR)/cpu/msr.c \
+    $(ARCH_DIR)/cpu/syscall_hal.c \
+    $(ARCH_DIR)/cpu/apic.c \
+    $(ARCH_DIR)/mm/mmu.c \
+    $(ARCH_DIR)/mm/uaccess.c \
+    $(KERNEL_DIR)/hal/drivers/uart/16550.c \
+    $(KERNEL_DIR)/hal/drivers/timer/pic_pit.c \
+    $(ARCH_DIR)/platform/platform.c \
+    $(ARCH_DIR)/hal.c \
+    $(ARCH_DIR)/virtio.c \
+    $(KERNEL_DIR)/hal/drivers/pci/pci.c \
+    $(KERNEL_DIR)/hal/src/bus.c
+else
+HAL_SOURCES = \
     $(ARCH_DIR)/cpu/cpu.c \
     $(ARCH_DIR)/cpu/syscall.c \
     $(ARCH_DIR)/mm/mmu.c \
     $(ARCH_DIR)/platform.c \
     $(ARCH_DIR)/hal.c \
     $(ARCH_DIR)/virtio.c \
-    $(KERNEL_DIR)/drivers/uart/pl011.c \
-    $(KERNEL_DIR)/drivers/gic/gic.c \
-    $(KERNEL_DIR)/drivers/timer/timer.c
+    $(KERNEL_DIR)/hal/drivers/uart/pl011.c \
+    $(KERNEL_DIR)/hal/drivers/gic/gic.c \
+    $(KERNEL_DIR)/hal/drivers/timer/timer.c \
+    $(KERNEL_DIR)/hal/src/bus.c
 endif
 
-KERN_C_SOURCES += \
-    $(KERNEL_DIR)/core/hal_bus.c \
-    $(KERNEL_DIR)/core/syscall_dispatch.c \
-    $(KERNEL_DIR)/core/timer.c \
-    $(KERNEL_DIR)/drivers/console.c \
-    $(KERNEL_DIR)/drivers/irq_ctrl.c \
-    $(KERNEL_DIR)/drivers/sys_timer.c \
-    $(KERNEL_DIR)/drivers/virtio/virtio_blk.c \
-    $(KERNEL_DIR)/drivers/virtio/virtio_input.c \
-    $(KERNEL_DIR)/drivers/gpu/virtio_gpu.c \
-    $(KERNEL_DIR)/drivers/gpu/gpu_core.c \
-    $(KERNEL_DIR)/drivers/keyboard/keyboard.c \
-    $(KERNEL_DIR)/fs/gpt.c \
-    $(KERNEL_DIR)/fs/ext4.c \
-    $(KERNEL_DIR)/fs/vfs.c \
-    $(KERNEL_DIR)/mm/pmm.c \
-    $(KERNEL_DIR)/mm/vmm.c \
-    $(KERNEL_DIR)/mm/buffer.c \
-    $(KERNEL_DIR)/lib/string.c \
-    $(KERNEL_DIR)/lib/crc32.c \
-    $(KERNEL_DIR)/lib/vsnprintf.c \
-    $(KERNEL_DIR)/lib/printk.c \
-    $(KERNEL_DIR)/lib/stack_protector.c \
-    $(KERNEL_DIR)/lib/math.c \
-    $(KERNEL_DIR)/lib/kmalloc.c \
-    $(KERNEL_DIR)/lib/registry.c \
-    $(KERNEL_DIR)/lib/ktest.c \
-    $(KERNEL_DIR)/lib/ktest_samples.c \
-    $(KERNEL_DIR)/lib/utf8.c \
-    $(KERNEL_DIR)/cpu.c \
-    $(KERNEL_DIR)/sched/process.c \
-    $(KERNEL_DIR)/sched/elf.c \
-    $(KERNEL_DIR)/graphics/graphics.c \
-    $(KERNEL_DIR)/graphics/region.c \
-    $(KERNEL_DIR)/graphics/gl.c \
-    $(KERNEL_DIR)/graphics/font.c \
-    $(KERNEL_DIR)/graphics/compositor.c \
-    $(KERNEL_DIR)/irq/irq.c \
-    $(KERNEL_DIR)/lib/fdt.c \
-    $(KERNEL_DIR)/main.c
+# --- Libkernel Sources (Architecture-Agnostic) ---
+LIBKERNEL_SOURCES = \
+    $(KERNEL_DIR)/libkernel/src/string.c \
+    $(KERNEL_DIR)/libkernel/src/math.c \
+    $(KERNEL_DIR)/libkernel/src/utf8.c \
+    $(KERNEL_DIR)/libkernel/src/crc32.c \
+    $(KERNEL_DIR)/libkernel/src/vsnprintf.c \
+    $(KERNEL_DIR)/libkernel/src/printk.c \
+    $(KERNEL_DIR)/libkernel/src/stack_protector.c \
+    $(KERNEL_DIR)/libkernel/src/kmalloc.c \
+    $(KERNEL_DIR)/libkernel/src/registry.c \
+    $(KERNEL_DIR)/libkernel/src/fdt.c
+
+# --- Microkernel Core Sources ---
+CORE_SOURCES = \
+    $(KERNEL_DIR)/core/src/main.c \
+    $(KERNEL_DIR)/core/src/syscall.c \
+    $(KERNEL_DIR)/core/src/stubs.c \
+    $(KERNEL_DIR)/core/src/boot_fs.c \
+    $(KERNEL_DIR)/core/src/timer.c \
+    $(KERNEL_DIR)/core/src/sched/process.c \
+    $(KERNEL_DIR)/core/src/sched/elf.c \
+    $(KERNEL_DIR)/core/src/syscall_proc.c \
+    $(KERNEL_DIR)/hal/src/mm/pmm.c \
+    $(KERNEL_DIR)/hal/src/mm/vmm.c \
+    $(KERNEL_DIR)/hal/src/mm/buffer.c \
+    $(KERNEL_DIR)/hal/src/irq/irq.c \
+    $(KERNEL_DIR)/core/src/cpu.c
+
+# --- Legacy Drivers (To be moved to user-space) ---
+DRIVER_SOURCES = \
+    $(KERNEL_DIR)/hal/drivers/console.c \
+    $(KERNEL_DIR)/hal/drivers/irq_ctrl.c \
+    $(KERNEL_DIR)/hal/drivers/sys_timer.c \
+    $(KERNEL_DIR)/hal/drivers/virtio/virtio_blk.c \
+    $(KERNEL_DIR)/hal/drivers/virtio/virtio_input.c \
+    $(KERNEL_DIR)/hal/drivers/gpu/virtio_gpu.c \
+    $(KERNEL_DIR)/hal/drivers/gpu/gpu_core.c \
+    $(KERNEL_DIR)/hal/drivers/keyboard/keyboard.c \
+    $(KERNEL_DIR)/core/src/graphics/graphics.c \
+    $(KERNEL_DIR)/core/src/graphics/region.c \
+    $(KERNEL_DIR)/core/src/graphics/gl.c \
+    $(KERNEL_DIR)/core/src/graphics/font.c
+
+KERN_C_SOURCES = $(HAL_SOURCES) $(LIBKERNEL_SOURCES) $(CORE_SOURCES) $(DRIVER_SOURCES)
 
 KERN_CPP_SOURCES = \
-    $(KERNEL_DIR)/drivers/cpp_test.cpp
+    $(KERNEL_DIR)/hal/drivers/cpp_test.cpp
 
 # Object files
 BOOT_OBJECTS = $(patsubst %.S,$(BUILD_DIR)/%.o,$(BOOT_SOURCES))
@@ -223,20 +234,19 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/$(ARCH_DIR)/mm
 	@mkdir -p $(BUILD_DIR)/$(ARCH_DIR)/platform
 	@mkdir -p $(BUILD_DIR)/$(ARCH_DIR)/drivers
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/drivers/uart
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/drivers/gic
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/drivers/timer
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/drivers/virtio
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/drivers/gpu
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/drivers/keyboard
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/fs
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/mm
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/lib
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/sched
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/graphics
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/irq
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/drivers/pci
-	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core/src/sched
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core/src/fs
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/core/src/graphics
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/src/mm
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/src/irq
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/uart
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/gic
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/timer
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/virtio
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/gpu
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/keyboard
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/hal/drivers/pci
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/libkernel/src
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/lib
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/sys/lib
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/sys/bin
@@ -273,7 +283,7 @@ SYS_ELFS = $(BUILD_DIR)/init.elf $(BUILD_DIR)/shell.elf $(BUILD_DIR)/notify_srv.
 # User ELFs (placed in /bin)
 BIN_ELFS = $(BUILD_DIR)/counter.elf $(BUILD_DIR)/demo3d.elf $(BUILD_DIR)/ipc_send.elf \
            $(BUILD_DIR)/ipc_recv.elf $(BUILD_DIR)/crash.elf $(BUILD_DIR)/writetest.elf \
-           $(BUILD_DIR)/doom.elf $(BUILD_DIR)/input_test.elf
+           $(BUILD_DIR)/input_test.elf
 
 USER_ELFS = $(SYS_ELFS) $(BIN_ELFS)
 
@@ -349,13 +359,7 @@ rootfs: user
 	@cp $(SYS_ELFS) $(BUILD_DIR)/rootfs/sys/bin/
 	@cp $(BIN_ELFS) $(BUILD_DIR)/rootfs/bin/
 	@cp user/sys/bin/init.cfg $(BUILD_DIR)/rootfs/etc/
-	@# Copy essential WAD files to the root and /bin for engine detection
-	@-cp user/bin/doom/doom.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
-	@-cp user/bin/doom/doom1.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
-	@-cp user/bin/doom/doom2.wad $(BUILD_DIR)/rootfs/ 2>/dev/null || true
-	@-cp user/bin/doom/doom.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
-	@-cp user/bin/doom/doom1.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
-	@-cp user/bin/doom/doom2.wad $(BUILD_DIR)/rootfs/bin/ 2>/dev/null || true
+
 	@mkdir -p $(BUILD_DIR)/rootfs/fonts
 	@-cp user/sys/bin/fontman/fonts/*.ttf $(BUILD_DIR)/rootfs/fonts/ 2>/dev/null || true
 	@-cp user/sys/bin/fontman/fonts/*.off $(BUILD_DIR)/rootfs/fonts/ 2>/dev/null || true
@@ -501,10 +505,3 @@ help:
 	@echo "  test-release - Build release and test it in QEMU (Use: make test-release VERSION=0.1.2)"
 	@echo "  run          - Build and run kernel directly"
 	@echo "  clean        - Remove build artifacts"
-
-# Include architecture-specific Doom makefiles
-ifeq ($(ARCH), aarch64)
-    include user/bin/doom/doom-nexs-aarch64.make
-else ifeq ($(ARCH), amd64)
-    include user/bin/doom/doom-nexs-amd64.make
-endif

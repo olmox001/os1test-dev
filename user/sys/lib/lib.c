@@ -51,9 +51,9 @@ void set_window_flags(int win_id, int flags) { _sys_window_set_flags(win_id, fla
 void set_focus(int pid) { extern void _sys_set_focus(int pid); _sys_set_focus(pid); }
 
 /* --- Shared Implementations (from kernel library) --- */
-#include "../../kernel/lib/vsnprintf.c"
-#include "../../kernel/lib/math.c"
-#include "../../kernel/lib/string.c"
+#include "../../../kernel/libkernel/src/vsnprintf.c"
+#include "../../../kernel/libkernel/src/math.c"
+#include "../../../kernel/libkernel/src/string.c"
 #include "font_lib.c"
 
 /* --- Stack protector support --- */
@@ -63,6 +63,13 @@ void __stack_chk_fail(void) { printf("Stack smashing detected!\n"); exit(1); }
 /* --- Registry Wrappers --- */
 int registry_read(const char *key, char *buf, size_t size) { return (int)_sys_registry(0, key, buf, size); }
 int registry_write(const char *key, const char *value) { return (int)_sys_registry(1, key, (char *)value, strlen(value)); }
+int registry_list(const char *path, char *buf, size_t size) { return (int)_sys_registry(2, path, buf, size); }
+
+/* --- Registry IPC Queue Wrappers (Plan 9 style per-key message passing) --- */
+int reg_ipc_send(const char *path, const struct reg_msg *msg) { return (int)_sys_reg_ipc_send(path, msg); }
+int reg_ipc_recv(const char *path, struct reg_msg *msg)       { return (int)_sys_reg_ipc_recv(path, msg); }
+int reg_ipc_pending(const char *path)                         { return (int)_sys_reg_ipc_pend(path); }
+int reg_list(const char *path, char *buf, size_t size)        { return (int)_sys_reg_list(path, buf, size); }
 
 int set_font(void *data, size_t size) {
   extern int _sys_set_font(void *data, size_t size);

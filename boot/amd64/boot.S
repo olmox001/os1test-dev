@@ -86,8 +86,8 @@ _start:
     movl $_stack_top, %esp
 
     /* Clear BSS */
-    movl $_bss_start, %edi
-    movl $_bss_end, %ecx
+    movl $__bss_start, %edi
+    movl $__bss_end, %ecx
     subl %edi, %ecx
     shrl $2, %ecx
     xorl %eax, %eax
@@ -175,13 +175,14 @@ long_mode_entry:
     /* Set up 64-bit stack */
     movabs $_stack_top, %rsp
 
-    /* Load multiboot info pointer as first argument (RDI) to kernel_main */
-    movl (mb_info_ptr), %edi
+    /* Pass Multiboot magic (RDI) and info pointer (RSI) to kernel_main */
+    movl (mb_magic), %edi
+    movl (mb_info_ptr), %esi
 
     /* Clear direction flag */
     cld
 
-    /* Call kernel_main(uint32_t mb_info_ptr) */
+    /* Call kernel_main(uint64_t magic, uint64_t mbi_ptr) */
     call kernel_main
 
     /* If kernel_main returns, halt */

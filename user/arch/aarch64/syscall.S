@@ -228,3 +228,28 @@ _sys_getcwd:
     mov x8, #256
     svc #0
     ret
+
+/* Registry IPC queue syscalls */
+.global _sys_reg_ipc_send
+_sys_reg_ipc_send:
+    mov x8, #260
+    svc #0
+    ret
+
+.global _sys_reg_ipc_recv
+_sys_reg_ipc_recv:
+    mov x8, #261
+    svc #0
+    ret
+
+.global _sys_reg_ipc_pend
+_sys_reg_ipc_pend:
+    mov x8, #262
+    svc #0
+    ret
+
+.global _sys_reg_list
+_sys_reg_list:
+    mov x8, #263
+    svc #0
+    ret
