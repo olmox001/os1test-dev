@@ -6,7 +6,7 @@
 > [`../PROJECT_CHARTER.md`](../PROJECT_CHARTER.md) (purpose & target architecture).
 >
 > Review date: 2026-06-02 · Branch: `comprehensive-review` · Build: **[verified]** both arches.
-> **`fs` (vfs/ext4/gpt) subsystem analysis is in progress and will be appended.**
+> All 9 subsystems analysed (fs included). Agent-delegated docs are maintainer spot-checked.
 
 ---
 
@@ -39,17 +39,17 @@ has **no user/kernel fault isolation** so it **halts** (**EXC-AMD64-02**).
 
 ---
 
-## 2. Severity rollup (8/9 subsystems; fs pending)
+## 2. Severity rollup (all 9 subsystems)
 
 | Severity | Count | Meaning |
 |---|---|---|
-| **W5** Critical | 1 | DRV-VIRTIO-01 (amd64 BAR truncation → 4G crash) |
-| **W4** Severe | 7 | boot/4GB, stack-DMA, IRQ no-op, font UAF, ELF map-escape, no-capabilities |
-| **W3** Significant | 54 | bugs/SMP-races/security/wrong-design on used paths |
-| **W2** Moderate | 93 | limitations, partial behaviour, refinements |
-| **W1** Minor | 38 | dead code, stale comments, micro-perf |
+| **W5** Critical | 3 | DRV-VIRTIO-01 (4G crash), EXT4-01 (extent format), VFS-01 (no VFS layer) |
+| **W4** Severe | 9 | boot/4GB, stack-DMA, IRQ no-op, font UAF, ELF map-escape, no-capabilities, ext4 write+no-ACL |
+| **W3** Significant | 60 | bugs/SMP-races/security/wrong-design on used paths |
+| **W2** Moderate | 101 | limitations, partial behaviour, refinements |
+| **W1** Minor | 42 | dead code, stale comments, micro-perf |
 | **W0** Info | 5 | cosmetic |
-| **Total** | **~198** | (+ fs) |
+| **Total** | **~220** | actionable tier (W3+) = **72** |
 
 ## 3. Cross-cutting themes → foundations (the refactor spine)
 
@@ -85,6 +85,10 @@ These recur across subsystems and are the dependency-ordered foundations (see ch
 | GFX-FONT-01 | W4 | SECURITY·BUG | `graphics/font.c:174-191`, `syscall_dispatch.c:234` | `sys_set_font` stores a **raw user pointer** into kernel globals, dereferenced during IRQ-context rendering → UAF / info-leak. |
 | ELF-01 | W4 | SECURITY | `sched/elf.c:48-92` | No `p_vaddr` range check; process PGDs share kernel upper-half by reference → crafted ELF can corrupt kernel page tables. |
 | ABI-04 | W4 | SECURITY | `core/syscall_dispatch.c:151,166,176,251` | No capability checks: any process can kill any PID, steal focus, destroy windows, write any file. |
+| EXT4-01 | W5 | BUG·MISSING | `fs/ext4.c:278-316`, `ext4.h:103` | Driver never reads `i_flags`; can't detect ext4 **extent-format** inodes → garbage reads on standard `mkfs.ext4` images (works only via `mkdisk`'s hand-built block-mapped inodes). |
+| VFS-01 | W5 | WRONG-DESIGN | `fs/vfs.c`, `vfs.h` | "VFS" is a 59-line path-normaliser: no vnode, no mount table, no `file_ops`; FS syscalls call `ext4_*` directly. Primary blocker to Plan 9 / seL4-service goals. |
+| EXT4-02 | W4 | SECURITY | `core/syscall_dispatch.c:176-199` | `FILE_WRITE` has no access control — any PID can overwrite any file, including `/init`. |
+| EXT4-03 | W4 | DOC·BUG | `fs/ext4.c:3,234` | "Read-Only" header is false: `ext4_write_file` really persists to disk (capped 48 KB / 12 direct blocks). |
 
 (Full W3 table and the W2/W1/W0 detail live in the per-subsystem docs; the W3 set is the
 remaining actionable tier and is the basis for the issue batch — see §6.)
@@ -123,14 +127,25 @@ explicit correction notes). Every finding cites `file:line`.
 | [02-boot-arch-hal](analysis/02-boot-arch-hal.md) | boot, platform, HAL, arch-MMU | maintainer |
 | [03-arch-cpu-exceptions](analysis/03-arch-cpu-exceptions.md) | CPU/IDT/exceptions/syscall-entry/uaccess | agent, vetted |
 | [04-drivers-irq](analysis/04-drivers-irq.md) | virtio/gpu/uart/gic/timer/pci/irq | agent, vetted (W5 here) |
-| [05-fs](analysis/05-fs.md) | vfs/ext4/gpt | **pending** |
+| [05-fs](analysis/05-fs.md) | vfs/ext4/gpt | agent, vetted (2×W5) |
 | [06-graphics](analysis/06-graphics.md) | compositor/font/gl/region | agent, vetted |
 | [07-lib-headers](analysis/07-lib-headers.md) | kernel lib + ABI headers + registry | agent, vetted+corrected |
 | [08-userland](analysis/08-userland.md) | init/shell/services/libs/apps | agent, vetted+corrected |
 | [09-sched-process-ipc-abi](analysis/09-sched-process-ipc-abi.md) | scheduler/process/IPC/ABI | maintainer |
 
-## 7. Issues
+## 7. Issues (GitHub)
 
-The complete W3+ actionable set (62 findings, + fs) is the basis for tracked issues.
-Destination/granularity confirmed with the maintainer; this section will link the created
-issues (or hold the markdown issue index) once generated.
+The W3+ actionable tier (**72 findings**) is filed as individual GitHub issues on
+`olmox001/os1test-dev`, labeled by severity (`w3`/`w4`/`w5`), kind (`bug`, `security`,
+`wrong-design`, `missing`, `stub`, `bad-impl`, `refine`, `perf`, `review-doc`) and
+`area:*`, all tagged `code-review`. W0–W2 findings remain in the per-subsystem docs above.
+
+- **Tracking epic:** [#19](https://github.com/olmox001/os1test-dev/issues/19)
+- **Per-finding issues:** [#20–#91](https://github.com/olmox001/os1test-dev/issues?q=is%3Aissue+is%3Aopen+label%3Acode-review) (72)
+- **Cross-cutting epics:** #92 Memory & address-space · #93 ABI & capabilities ·
+  #94 amd64 boot/4GB · #95 Service isolation (seL4/Plan 9) · #96 SMP correctness
+- Filter examples: `gh issue list --label code-review`, `--label w5`, `--label area:fs`.
+
+Each issue body carries the `file:line` location, the finding text (maintainer-corrected),
+and a pointer to its subsystem doc + this index. They are the unit of work for the
+delegated fix phase (Phase 3).

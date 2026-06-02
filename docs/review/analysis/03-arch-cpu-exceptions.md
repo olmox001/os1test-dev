@@ -1,4 +1,4 @@
-> STATUS: DRAFT (agent-generated, pending maintainer spot-check)
+> STATUS: agent-generated, **maintainer spot-checked** (2026-06-02) — see REVIEW.md Corrections section.
 
 # Subsystem Analysis 03 — CPU, Exceptions, Syscall Entry, Context Switch & User-Access
 
