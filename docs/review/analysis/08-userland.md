@@ -1,4 +1,9 @@
-> STATUS: DRAFT (agent-generated, pending maintainer spot-check)
+> STATUS: agent-generated, **maintainer spot-checked & corrected** (2026-06-02).
+> Corrections applied: USR-INIT-01 downgraded **W3→W1** — the PID-reuse hazard is **not
+> live** (`next_pid` is a monotonic counter, never reused: `kernel/sched/process.c:20,233`).
+> USR-MALLOC-01 mechanism corrected (the `memset` uses the wrapped-small `total`; the
+> overflow is the *caller* writing past the undersized buffer). USR-FONTMAN-01,
+> USR-BLOAT-01/02, USR-MALLOC-05 independently verified against source — confirmed.
 
 # Subsystem Analysis 08 — Userland (init, shell, services, lib, apps)
 
@@ -71,13 +76,13 @@ Kernel ELF loader
 
 | ID | Sev | Kind | Location | Summary |
 |----|-----|------|----------|---------|
-| USR-INIT-01 | W3 | BUG · BAD-IMPL | `init.c:39–53` | Supervisor loop is a non-blocking poll but has a PID-reuse hazard: after shell reap+respawn, the old notify PID variable may match the new shell PID on next iteration, causing a double-reap attempt; the two `wait()` calls also interleave without atomicity. |
+| USR-INIT-01 | W1 | REFINE | `init.c:39–53` | Supervisor loop is a **correct** non-blocking poll today. *Maintainer correction:* the PID-reuse hazard the draft flagged is **not live** — `next_pid` is monotonic (`process.c:20,233`), PIDs are never reused, and init is single-threaded with cooperative `yield`. Residual (defensive): the loop assumes monotonic PIDs and would need a generation/owner check if PID recycling is ever introduced. |
 | USR-INIT-02 | W3 | MISSING · DOC | `init.c:5–6`; `init.cfg:6,9` | `init.cfg` is never read despite file_read existing; the cfg paths (`/notify_srv.elf`, `/shell`) don't match actual rootfs layout (`/sys/bin/notify_srv`, `/sys/bin/shell`). Dead config file, ignored by code. |
 | USR-INIT-03 | W2 | BAD-IMPL | `init.c:39–53` | No mechanism to limit respawn rate: a crashing service respawns immediately and unconditionally; a tight crash-respawn loop will saturate the process table (`MAX_PROCESSES = 64`, `os1.h:16`) with zombies. |
 | USR-SEC-01 | W3 | SECURITY | `lib.c:64–65`, `notification_server.c:33`, `lib.c:115` | Global registry has no caller authentication. `notify_srv` writes its PID to `srv.notify_pid`; `notify()` reads that key to route messages. Any process can overwrite `srv.notify_pid` and intercept or forge system notifications. |
 | USR-SEC-02 | W3 | SECURITY | `lib.c:47–48`, `shell.c:135–149` | `send()` and `kill_process()` accept arbitrary PIDs with no capability check. Shell parses a decimal argument directly from user input and passes it to `kill_process` (shell.c:139–148), allowing any user to kill any system service. |
 | USR-SEC-03 | W3 | WRONG-DESIGN | All services | No sandboxing exists. Services run with flat memory, unrestricted IPC, and full spawn authority. There are no seL4-style capability tokens, no namespace isolation, and no resource quotas. Assessment: zero isolation. |
-| USR-MALLOC-01 | W3 | SECURITY | `malloc.c:107` | `calloc(nmemb, size)` computes `total = nmemb * size` with no overflow check. A caller with attacker-controlled sizes gets a small allocation with `memset(ptr, 0, overflow_total)` → heap corruption. |
+| USR-MALLOC-01 | W3 | SECURITY | `malloc.c:106-108` | `calloc(nmemb, size)` computes `total = nmemb * size` with **no overflow check** → undersized allocation. *Maintainer correction of mechanism:* the `memset` uses the same wrapped-small `total` (so the memset itself is in-bounds); the corruption is the **caller** — expecting `nmemb*size` bytes — overflowing the short buffer. Classic calloc-overflow → heap corruption. |
 | USR-MALLOC-02 | W2 | BAD-IMPL | `malloc.c:77–80` | Forward coalescing assumes `block->next` is physically contiguous with current block. This is only true if `next` was split from current; it is false when `next` was a separate `sbrk` call. Corrupts the free list silently. |
 | USR-MALLOC-03 | W2 | WRONG-DESIGN | `malloc.c:20–67` | No backward coalescing (acknowledged in comment at line 82–83). An `alloc/free/alloc/free` sequence with alternating sizes fragments the heap permanently; freed blocks before the current one are never merged. |
 | USR-MALLOC-04 | W2 | WRONG-DESIGN | `malloc.c:54–67` | Heap never shrinks: sbrk'd pages are never returned to the kernel even when fully free. Long-running services will grow indefinitely. |
@@ -103,7 +108,7 @@ Kernel ELF loader
 
 ## 6. Detailed Entries
 
-### USR-INIT-01 — init supervisor loop: PID reuse hazard and atomic-reap gap `[static]`
+### USR-INIT-01 — init supervisor loop (maintainer-corrected: hazards NOT live) `[static]`
 
 `init.c:39–53`:
 ```
@@ -120,7 +125,14 @@ while (1) {
 
 The kernel's `process_wait()` (`kernel/sched/process.c:710–741`) is **non-blocking**: it returns -1 if the named process is alive, the PID if it is a zombie/dead (and reaps it), or -2 if not found. The loop is therefore a correct poll — it does not block. The owner's concern about "sequential blocking wait" is partially denied: there is no blocking stall.
 
-However, two genuine bugs remain:
+**Maintainer correction (2026-06-02): the two hazards below are NOT live.** `next_pid` is a
+monotonic counter that never resets or reuses freed PIDs (`kernel/sched/process.c:20` and
+`:233` `proc->pid = next_pid++`), and `process_pool` is indexed by *slot*, not PID. So a
+respawned shell can never collide with `pid_notify`, and (init being single-threaded with
+cooperative `yield`) there is no recycle to race. **USR-INIT-01 is therefore downgraded to
+W1/REFINE.** The genuinely actionable init issues are USR-INIT-02 (`init.cfg` ignored) and
+USR-INIT-03 (no respawn backoff). The draft's original hypothetical analysis is retained
+below for context only:
 
 1. **PID reuse hazard.** After `pid_shell` dies and is reaped at L41, `spawn()` assigns a new PID to `pid_shell` at L43. If the kernel's PID allocator reuses a recently freed PID (MAX_PROCESSES is 64; `kernel/sched/process.c:process_pool` is an array indexed by PID), the new shell PID could coincide with `pid_notify`. On the very next L47 check, `wait(pid_notify)` would reap the freshly spawned shell, not the notification server. The result is silent process table corruption.
 

@@ -1,4 +1,8 @@
-> STATUS: DRAFT (agent-generated, pending maintainer spot-check)
+> STATUS: agent-generated, **maintainer spot-checked & corrected** (2026-06-02).
+> Correction: LIB-MATH-01 downgraded **W3→W2 (latent)** — the buggy `FP_PI` does corrupt the
+> compiled `sin_fp`/`cos_fp`, but its only consumer (`kernel/graphics/draw3d.c`) is **not in
+> the Makefile build**; no compiled kernel code calls `sin_fp/cos_fp`, so there is no live
+> runtime impact today. LIB-KTEST-01, ABI-HDR-01, LIB-REG-02 verified against source — confirmed.
 
 # Subsystem Analysis 07 — Kernel Library (`kernel/lib/`) + Public API Headers (`include/api/`)
 
@@ -92,7 +96,7 @@ The amd64 implementations of `fdt_init` and `fdt_find_in_memory` are explicit st
 
 | ID | Sev | Kind | Location | Summary |
 |----|-----|------|----------|---------|
-| LIB-MATH-01 | W3 | BUG | `kernel/lib/math.c:8-13` + `kernel/include/kernel/math.h:16` | When `KERNEL` is defined, `math.h:16` sets `FP_PI 411775` (= 2π); `math.c`'s `#ifndef FP_PI` guard is skipped → `sin_fp`/`cos_fp` wrap at 2π not π. All kernel rotation math is wrong for any angle whose 16.16 representation differs from 0 or 2π. Confirmed real impact: `kernel/graphics/draw3d.c:114-115` calls `k_sin_fp`/`k_cos_fp`. |
+| LIB-MATH-01 | W2 | BUG (latent) | `kernel/include/kernel/math.h:16`; `kernel/lib/math.c` | In kernel builds `math.h:16` defines `FP_PI 411775` (=2π in 16.16; mislabeled "π"), so `math.c`'s `#ifndef FP_PI` fallback (`205887`) is skipped → compiled `sin_fp`/`cos_fp` reflect about 2π and are wrong for angles in (π/2, 2π]. ***Maintainer: latent*** — the only consumer `graphics/draw3d.c` is **not compiled** (absent from Makefile); no live kernel caller exists. Fix the constant before any 3D code is built. Userland `os1.h:170` already has the correct `205887`. |
 | LIB-MATH-02 | W1 | DOC | `kernel/include/kernel/math.h:16` | Comment says "3.14159 × 131072" but 131072 = 2^17, so the value is 2π × 2^16. Misleading. |
 | LIB-VSNPRINTF-01 | W1 | BUG | `kernel/lib/vsnprintf.c:41,49-55` | Sign character is emitted without subtracting 1 from `width`; `%05d` of -42 formats as `"-00042"` (6 chars) instead of `"-0042"`. |
 | LIB-VSNPRINTF-02 | W1 | REFINE | `kernel/lib/vsnprintf.c:73` | Returns chars written (< `size`), not the chars-needed-if-unbounded. Callers cannot detect truncation. Not POSIX-conformant. |
@@ -231,7 +235,7 @@ When `KERNEL` is defined (i.e., in kernel builds), `math.c:8-9` includes `<kerne
 
 Consequence: `sin_fp` (`math.c:123-136`) range-reduces with `while (x > FP_PI) x -= FP_2PI`, where `FP_2PI = 411775`. When `FP_PI == FP_2PI`, the range-reduction loop condition `x > 411775` triggers only for angles beyond 2π — inputs between 0 and 2π pass through unreduced.
 
-The subsequent reflection at `:132-136` (`if x > half_pi: x = FP_PI - x`) uses the wrong pole: it computes `FP_PI(411775) - x` instead of `true_pi(205887) - x`. For any input where `|x| > π/2` (approximately `x > 102944` in 16.16), the reflection maps to the wrong quadrant. For example, `sin_fp(205887)` (= π in correct 16.16 notation) folds to `411775 - 205887 = 205888` (≈ π), and the Taylor series at ≈ π returns approximately 0.53 (≈ 34800 in 16.16) instead of 0. The bug corrupts `sin` for all angles in `(π/2, 2π]` — which is three-quarters of the useful domain. All kernel 3D rotation (`draw3d.c:114-115`) is wrong.
+The subsequent reflection at `:132-136` (`if x > half_pi: x = FP_PI - x`) uses the wrong pole: it computes `FP_PI(411775) - x` instead of `true_pi(205887) - x`. For any input where `|x| > π/2` (approximately `x > 102944` in 16.16), the reflection maps to the wrong quadrant. For example, `sin_fp(205887)` (= π in correct 16.16 notation) folds to `411775 - 205887 = 205888` (≈ π), and the Taylor series at ≈ π returns approximately 0.53 (≈ 34800 in 16.16) instead of 0. The bug corrupts `sin` for all angles in `(π/2, 2π]` — three-quarters of the useful domain — **in the compiled `sin_fp`/`cos_fp` functions**. *Maintainer note (latent):* the only kernel caller, `kernel/graphics/draw3d.c:114-115`, is **not in the Makefile build**, and no other compiled kernel code calls `sin_fp`/`cos_fp` (verified by grep), so there is **no live runtime impact today**; the bug becomes live the moment any 3D/rotation code is compiled in.
 
 Userland (`os1.h:170`) defines `FP_PI 205887` (correct). Math is correct in userland; broken in kernel builds.
 
