@@ -1,6 +1,54 @@
 /*
  * kernel/graphics/font.c
  * Font rendering and management
+ *
+ * Role:
+ *   Per-glyph alpha-masked blit from a pre-rasterised bitmap font embedded
+ *   via <graphics/default_font.h> (Rewir-Light.ttf, compiled to a C array).
+ *   Provides gl_draw_char / gl_draw_string for use by compositor.c's terminal
+ *   emulator, and exports font metric queries (height, ascent, max width).
+ *   Also implements sys_set_font(), the syscall entry point (syscall 253) that
+ *   allows userland to replace the active font at runtime.
+ *
+ * Font state:
+ *   The singleton current_font struct holds a font_header (magic, first_char,
+ *   num_chars, ascent, descent, bitmap_size), a pointer to the glyph-info
+ *   array (glyphs), a pointer to the bitmap data, and an is_dynamic flag.
+ *   At startup, glyphs and bitmap point into the statically-linked default
+ *   font arrays.  After sys_set_font(), they point into user-space memory.
+ *
+ * Rendering:
+ *   gl_draw_char locates the glyph_info for a codepoint, reads the per-pixel
+ *   alpha mask from the bitmap, and blends each non-zero pixel onto the
+ *   surface using an >>8 approximation (not exact /255 division).  Fully
+ *   opaque pixels (alpha=255) are written directly.
+ *
+ * Locking & IRQ context:
+ *   No lock protects current_font.  gl_draw_char is called from
+ *   compositor_window_write (under compositor_lock) and from
+ *   compositor_render_internal (also under compositor_lock from
+ *   compositor_tick, which fires from a timer IRQ).  sys_set_font is called
+ *   from syscall context.  There is no synchronisation between them.
+ *
+ * Known issues:
+ *   GFX-FONT-01 (W4 SECURITY BUG) sys_set_font stores the raw userland
+ *               pointer 'data' directly into current_font.glyphs and
+ *               current_font.bitmap without copy_from_user, address-space
+ *               validation, or a kernel-heap copy.  These pointers are later
+ *               dereferenced in gl_draw_char during IRQ-context rendering
+ *               (compositor_tick).  Consequences: (a) process exit after
+ *               set-font leaves dangling pointers — fault on next render;
+ *               (b) a kernel-address passed as 'data' causes kernel-memory
+ *               bytes to be rendered to the framebuffer (information
+ *               disclosure); (c) if num_chars is near SIZE_MAX the expected
+ *               size calculation overflows and size < expected passes
+ *               spuriously.  Fix: copy the blob into kmalloc'd kernel memory
+ *               inside sys_set_font, validate all internal offsets.
+ *   GFX-FONT-02 (W3 BUG) graphics_font_height() returns ascent+descent with
+ *               no zero check.  A malformed font loaded via sys_set_font with
+ *               ascent=0 and descent=0 causes a divide-by-zero in
+ *               compositor_create_window (h / char_h, compositor.c:204).
+ *               Fix: validate ascent+descent > 0 in sys_set_font.
  */
 #include <graphics/gl.h>
 #include <kernel/graphics.h>
@@ -12,9 +60,25 @@
 #include <graphics/default_font.h>
 
 /* Forward declarations */
+/* utf8_decode: defined in kernel/lib/utf8.c (or equivalent); advances 's' by
+ * the byte width of the first codepoint and writes the decoded value to *code.
+ * Returns byte count consumed (1..4), or <= 0 on invalid sequence. */
 int utf8_decode(const char *s, uint32_t *code);
 
 /* Internal font state */
+/*
+ * current_font: singleton active font state.
+ *   header   — copy of font_header (magic, first_char, num_chars, ascent,
+ *              descent, bitmap_size).
+ *   glyphs   — pointer to glyph-info array (num_chars entries).
+ *   bitmap   — pointer to packed alpha bitmap data.
+ *   is_dynamic — 0 if glyphs/bitmap point into static default_font arrays;
+ *               1 if they point into a user-supplied buffer (see sys_set_font).
+ *
+ * NOTE(GFX-FONT-01): when is_dynamic==1, glyphs and bitmap are raw userland
+ * virtual addresses stored without copy_from_user; they may become dangling
+ * after process exit and are dereferenced from IRQ context.
+ */
 static struct {
     struct font_header header;
     const struct font_glyph_info *glyphs;
@@ -34,6 +98,34 @@ static struct {
     .is_dynamic = 0
 };
 
+/*
+ * gl_draw_char - render one Unicode codepoint from the active font onto surf.
+ *
+ * Params: surf — target surface; x, y — top-left origin for the glyph cell;
+ *         codepoint — Unicode scalar value; color — ARGB8888 foreground.
+ *
+ * Algorithm:
+ *   1. Compute glyph index: idx = codepoint - first_char.  Out-of-range
+ *      codepoints (idx < 0 or >= num_chars) are silently skipped.
+ *   2. Look up font_glyph_info gi from current_font.glyphs[idx].
+ *   3. Compute pixel origin: start_x = x + gi->x0,
+ *      start_y = y + ascent + gi->y0  (baseline offset).
+ *   4. Walk the glyph's alpha mask (gi->height rows x gi->width cols):
+ *      - alpha==0: skip (transparent pixel).
+ *      - alpha==255: direct write (no blend arithmetic).
+ *      - otherwise: blend using >>8 approximation (not exact /255).
+ *        Note: >>8 differs from /255 by at most 1 LSB; visible only at
+ *        specific alpha values (e.g. alpha=128, dst=255 → 127 vs 128).
+ *   5. Per-pixel bounds check against surf->width/height before any write.
+ *
+ * NOTE(GFX-FONT-01): current_font.glyphs and current_font.bitmap may point
+ *   into userland memory if sys_set_font was called; dereferencing them here
+ *   from IRQ context (compositor_tick) is unsafe.
+ *
+ * Locking: none; called under compositor_lock from compositor_window_write
+ *          and compositor_render_internal.
+ * Side effects: writes pixels to surf->buffer.
+ */
 /*
  * Draw character using GL
  */
@@ -86,6 +178,16 @@ void gl_draw_char(struct gl_surface *surf, int x, int y, uint32_t codepoint,
 }
 
 /*
+ * graphics_char_width - return the horizontal advance width for a codepoint.
+ *
+ * Param: codepoint — Unicode scalar value.
+ * Returns advance width in pixels from the active font's glyph_info, or 0 if
+ * the codepoint is outside [first_char, first_char+num_chars).
+ * Used by gl_draw_string and graphics_string_width to advance the cursor.
+ *
+ * Locking: none; reads current_font.glyphs (see NOTE GFX-FONT-01).
+ */
+/*
  * Get character advance width
  */
 int graphics_char_width(uint32_t codepoint) {
@@ -95,6 +197,19 @@ int graphics_char_width(uint32_t codepoint) {
   return current_font.glyphs[idx].advance;
 }
 
+/*
+ * gl_draw_string - render a UTF-8 string left-to-right onto surf.
+ *
+ * Params: surf — target surface; x, y — origin of the first glyph cell;
+ *         str — null-terminated UTF-8 string; color — ARGB8888 foreground.
+ *
+ * Decodes each codepoint via utf8_decode, renders it with gl_draw_char at the
+ * current cursor_x, then advances cursor_x by graphics_char_width.  Invalid
+ * UTF-8 sequences (consumed <= 0) consume one byte and continue.
+ *
+ * Locking: none; called under compositor_lock in compositor_render_internal.
+ * Side effects: writes pixels to surf->buffer.
+ */
 /*
  * Draw string using GL (UTF-8 supported)
  */
@@ -120,6 +235,15 @@ void gl_draw_string(struct gl_surface *surf, int x, int y, const char *str,
 }
 
 /*
+ * graphics_string_width - compute pixel width of a UTF-8 string.
+ *
+ * Param: str — null-terminated UTF-8 string (NULL-safe: returns 0).
+ * Sums graphics_char_width for each decoded codepoint.  Mirrors the cursor
+ * advance in gl_draw_string so callers can centre text (e.g. title bar).
+ *
+ * Locking: none; reads current_font.glyphs (see NOTE GFX-FONT-01).
+ */
+/*
  * Get string width in pixels (UTF-8 supported)
  */
 int graphics_string_width(const char *str) {
@@ -143,6 +267,19 @@ int graphics_string_width(const char *str) {
 }
 
 /*
+ * graphics_font_height - return the total line height of the active font.
+ *
+ * Returns ascent + descent in pixels.  Used as char_h in compositor for row
+ * count and scroll arithmetic.
+ *
+ * NOTE(GFX-FONT-02): does not validate that ascent+descent > 0.  A malformed
+ *   font loaded via sys_set_font with both fields zero causes a divide-by-zero
+ *   at compositor_create_window (h / char_h).  Fix: check in sys_set_font.
+ *
+ * Locking: none; reads current_font.header (not IRQ-safe under sys_set_font
+ *          race, see GFX-FONT-01).
+ */
+/*
  * Get font height
  */
 int graphics_font_height(void) { 
@@ -150,10 +287,18 @@ int graphics_font_height(void) {
 }
 
 /*
+ * graphics_font_ascent - return the ascent of the active font in pixels.
+ *
+ * Ascent is the distance from the baseline to the top of the tallest glyph.
+ * Used in gl_draw_char to compute start_y = y + ascent + gi->y0.
+ *
+ * Locking: none.
+ */
+/*
  * Get font ascent
  */
-int graphics_font_ascent(void) { 
-    return current_font.header.ascent; 
+int graphics_font_ascent(void) {
+    return current_font.header.ascent;
 }
 
 /*
