@@ -1,6 +1,29 @@
 /*
  * kernel/arch/amd64/hal.c
- * AMD64 Architecture Specific HAL Implementation
+ * AMD64 Hardware Abstraction Layer — PCI Bus Scan and Timer Init
+ *
+ * Responsibilities:
+ *   - amd64_pci_callback: called by pci_enumerate for each discovered PCI
+ *     function; enables Bus Master + I/O + Memory access, reads BAR0 and BAR4,
+ *     translates VirtIO device IDs, assigns the IRQ, and registers the device
+ *     with the HAL device table via hal_register_device.
+ *   - arch_bus_scan: invokes pci_enumerate(amd64_pci_callback) to build the
+ *     HAL device list.
+ *   - arch_irq_init: initialises the legacy 8259 PIC.
+ *   - arch_timer_init: runs LAPIC calibration once on the BSP.
+ *   - timer_init_percpu: starts the per-CPU LAPIC periodic timer at HZ.
+ *
+ * Known issues:
+ *   DRV-VIRTIO-01 (W5 BUG) pci_get_bar (pci.c:106) returns uint32_t.  For
+ *     64-bit BAR entries (type bits [2:1] = 0b10), the high 32 bits of the
+ *     MMIO base address are in the NEXT BAR register and are not read.  When
+ *     QEMU places the virtio-blk BAR above 4 GB ('-m 4G'), the low 32 bits
+ *     returned by pci_get_bar(bdf, 4) are 0 or an alias, so dev->base is
+ *     wrong.  The virtio driver reads QUEUE_NUM_MAX from the wrong address and
+ *     gets 0 → "Invalid queue size (0)!" → downstream divide-by-zero crash.
+ *     Cross-ref: DRV-PCI-02 (pci.c:106-111).
+ *     Fix: in amd64_pci_callback, after reading b4, check bits [2:1]; if 10b,
+ *     read BAR5 and compose a uint64_t base address.
  */
 #include <kernel/hal.h>
 #include <drivers/pci.h>

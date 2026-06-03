@@ -1,7 +1,35 @@
 /*
- * user/shell.c
- * Standalone Graphical Shell for AArch64 OS
- * Each process creates its own TTY window in the compositor.
+ * user/sys/bin/shell.c
+ * Interactive Graphical Shell
+ *
+ * Creates a compositor window that acts as a TTY.  Reads single characters
+ * from fd 0 (keyboard input delivered as IPC by the kernel input driver),
+ * accumulates them into cmd_buf, and dispatches on newline.
+ *
+ * Command dispatch is a linear if-else chain (process_command).  Commands
+ * that need an argument parse character offsets directly from cmd_buf rather
+ * than splitting tokens — the pattern `cmd_buf[2] == ' '` / `&cmd_buf[3]`
+ * appears for ls, cd, cat, kill, notify.
+ *
+ * The shell accepts arbitrary PID arguments to kill without any privilege
+ * check; see USR-SEC-02.
+ *
+ * Known issues:
+ *   USR-SEC-02  (W3 SECURITY) kill <pid> accepts any decimal PID from user
+ *               input and passes it directly to kill_process() with no
+ *               capability check; any user can kill any system service.
+ *   USR-SEC-03  (W3 WRONG-DESIGN) spawn() (and the fallback at line ~192)
+ *               launches any ELF with full authority; no namespace or
+ *               sandboxing constraint applies.
+ *   USR-SHELL-01 (W2 BAD-IMPL) Command parsing uses hardcoded character
+ *                offsets (e.g. cmd_buf[2]=='  ', &cmd_buf[3]) instead of
+ *                token splitting; brittle and inconsistent across commands.
+ *   USR-SHELL-02 (W2 MISSING) cmd_buf is 128 bytes, single-line only; no
+ *                command history, no tab completion, no argument splitting.
+ *   USR-BLOAT-01 (W2 BAD-IMPL·PERF) Every shell binary carries the full
+ *                stb_image/stb_easy_font blob via lib.o (~500KB ELF).
+ *   USR-BLOAT-02 (W2 BAD-IMPL) -g DWARF and -fno-omit-frame-pointer inflate
+ *                the ELF; no --gc-sections or strip step.
  */
 #include "proce.h"
 #include <os1.h>
@@ -15,14 +43,32 @@
 #define COLOR_FG 0xFFe0e0e0
 #define COLOR_PROMPT 0xFF00ff88
 
-/* Shell state */
+/*
+ * Shell state — module-level globals (one set per shell process since there
+ * is no shared-library mechanism; each shell ELF has its own BSS).
+ *
+ * my_window: compositor window ID for this shell instance; -1 until created.
+ * running:   cleared by the "exit" command to break the input loop.
+ * cmd_buf:   accumulates the current line; NUL-terminated before dispatch.
+ * cmd_len:   index of the next character to write in cmd_buf.
+ *
+ * NOTE(USR-SHELL-02): cmd_buf[128] limits line length to 127 printable chars
+ * with no overflow protection beyond the `cmd_len < 126` guard in the input
+ * loop; there is no history or tab-completion state.
+ */
 static int my_window = -1;
 static int running = 1;
 static char cmd_buf[128];
 static int cmd_len = 0;
 
 /*
- * Compare strings
+ * str_eq - naive NUL-terminated string equality test.
+ *
+ * Returns 1 if 'a' and 'b' are identical, 0 otherwise.
+ * Both pointers must be valid (no NULL guard).
+ *
+ * The standard strcmp/strncmp from lib.c/string.c could replace this;
+ * the standalone copy predates the library import.
  */
 static int str_eq(const char *a, const char *b) {
   while (*a && *b) {
@@ -35,7 +81,14 @@ static int str_eq(const char *a, const char *b) {
 }
 
 /*
- * Redraw window background
+ * shell_redraw - repaint the window background.
+ *
+ * Fills the entire window with COLOR_BG (dark navy), then draws a 2-pixel
+ * accent stripe at the top in COLOR_PROMPT (bright green).  Calls
+ * compositor_render() to push the update to the screen.
+ *
+ * Guards against my_window < 0 (window not yet created); safe to call early
+ * but does nothing until create_window() has succeeded.
  */
 static void shell_redraw(void) {
   if (my_window < 0)
@@ -51,7 +104,23 @@ static void shell_redraw(void) {
 }
 
 /*
- * Process command
+ * process_command - parse and dispatch the accumulated line in cmd_buf.
+ *
+ * NUL-terminates cmd_buf at cmd_len, then matches against a linear chain of
+ * if-else branches.  Returns early on an empty line.
+ *
+ * Dispatch strategy (NOTE USR-SHELL-01):
+ *   - Fixed-word commands ("help", "clear", "time", etc.) use str_eq().
+ *   - Commands with arguments ("ls", "cd", "cat", "kill", "notify") detect
+ *     the command prefix by inspecting individual characters (cmd_buf[0..N])
+ *     and extract the argument via hardcoded byte offsets (e.g. &cmd_buf[3]
+ *     for "ls <path>", &cmd_buf[4] for "cat <path>").  There is no tokeniser.
+ *   - Unknown tokens are tried as ELF paths: relative names are prefixed with
+ *     "/bin/" and passed to spawn().  There is no PATH search.
+ *
+ * On return, cmd_len is reset to 0 (erases the accumulated line).
+ *
+ * Side effects: writes to UART/window, may spawn processes, may call exit().
  */
 static void process_command(void) {
   cmd_buf[cmd_len] = '\0';
@@ -109,6 +178,8 @@ static void process_command(void) {
   } else if (str_eq(cmd_buf, "ps")) {
     proce_display_list(my_window);
   } else if (str_eq(cmd_buf, "ls") || (cmd_buf[0] == 'l' && cmd_buf[1] == 's' && cmd_buf[2] == ' ')) {
+    /* NOTE(USR-SHELL-01): Argument parsed with hardcoded byte offsets.
+     * "ls" alone uses "."; "ls <path>" takes &cmd_buf[3] as the path. */
     const char *path = ".";
     if (cmd_buf[2] == ' ') path = &cmd_buf[3];
     char buf[1024];
@@ -127,6 +198,8 @@ static void process_command(void) {
       print("Error getting CWD\n");
     }
   } else if (cmd_buf[0] == 'c' && cmd_buf[1] == 'd' && (cmd_buf[2] == ' ' || cmd_buf[2] == '\0')) {
+    /* NOTE(USR-SHELL-01): "cd" with no argument defaults to "/"; argument
+     * at &cmd_buf[3] (hardcoded offset after "cd "). */
     const char *path = "/";
     if (cmd_buf[2] == ' ') path = &cmd_buf[3];
     if (chdir(path) != 0) {
@@ -134,7 +207,12 @@ static void process_command(void) {
     }
   } else if (cmd_buf[0] == 'k' && cmd_buf[1] == 'i' && cmd_buf[2] == 'l' &&
              cmd_buf[3] == 'l' && cmd_buf[4] == ' ') {
-    /* Parse PID from "kill <pid>" */
+    /* Parse PID from "kill <pid>".
+     * NOTE(USR-SEC-02): The PID is read directly from user input (decimal
+     * digits at cmd_buf[5..]) and passed to kill_process() with no capability
+     * check.  Any user can kill any PID including system services (init,
+     * notify_srv).  The loop stops at the first non-digit; overflowing int
+     * is silent (no range check). */
     int pid = 0;
     for (int i = 5; cmd_buf[i] >= '0' && cmd_buf[i] <= '9'; i++) {
       pid = pid * 10 + (cmd_buf[i] - '0');
@@ -182,7 +260,11 @@ static void process_command(void) {
         print("\n");
     }
   } else {
-    /* Try spawn */
+    /* Unknown command: try to spawn it as an ELF.
+     * Absolute paths (starting with '/') are used as-is; relative names are
+     * prefixed with "/bin/".  There is no PATH search and no shell scripting.
+     * NOTE(USR-SEC-03): spawn() grants the new process full ambient authority
+     * (arbitrary IPC, kill, registry, spawn); no sandboxing applies. */
     char path[64];
     /* Prepend / if not present */
     if (cmd_buf[0] == '/')
@@ -202,12 +284,28 @@ static void process_command(void) {
 }
 
 /*
- * Main shell entry
+ * main - shell entry point; does not return.
+ *
+ * 1. Creates a compositor window with position offset by (pid*40)%200 so
+ *    multiple shell instances tile without fully overlapping.
+ * 2. Calls shell_redraw() and set_focus() to make the window active.
+ * 3. Prints the initial prompt (with ANSI colour) to the TTY and mirrors
+ *    "shell> " to fd 3 (UART) for serial console visibility.
+ * 4. Enters the character-by-character input loop:
+ *      - '\n'/'\r' -> process_command(), reprint prompt.
+ *      - '\b'/DEL  -> erase last character (ANSI backspace-space-backspace).
+ *      - Printable  -> append to cmd_buf, echo to window.
+ *    read(0, buf, 1) blocks until a byte is available on the keyboard fd.
+ *
+ * Side effects: allocates a compositor window, reads from fd 0, writes to
+ *   fd 1 (window/TTY), fd 3 (UART mirror), and calls process_command().
  */
 int main(void) {
   print("Shell: Alive\n");
   int pid = get_pid();
-  /* Create a unique window for this shell instance */
+  /* Create a unique window for this shell instance.
+   * x_off/y_off stagger multiple shell windows by pid so they do not
+   * stack exactly on top of each other. */
   char title[32];
   sprintf(title, "Shell PID %d", pid);
 
@@ -231,14 +329,17 @@ int main(void) {
   printf("\033[32mshell\033[0m:\033[34m%s\033[0m> ", cwd);
   write(3, "shell> ", 7); /* Mirror to UART */
 
+  /* buf[1] always stays NUL so print(buf) terminates correctly after echoing
+   * a single printable character without calling strlen on uninitialized data. */
   char buf[2] = {0, 0};
   while (running) {
-    long n = read(0, buf, 1);
+    long n = read(0, buf, 1);  /* Blocking read from keyboard fd */
     if (n <= 0)
       continue;
 
     char c = buf[0];
     if (c == '\n' || c == '\r') {
+      /* End of line: dispatch command then reprint the prompt. */
       process_command();
       if (running) {
         char prompt_cwd[128];
@@ -246,11 +347,15 @@ int main(void) {
         printf("\033[32mshell\033[0m:\033[34m%s\033[0m> ", prompt_cwd);
       }
     } else if (c == '\b' || c == 127) {
+      /* Backspace (0x08) or DEL (0x7F): erase last character.
+       * "\b \b" moves back, overwrites with space, moves back again. */
       if (cmd_len > 0) {
         cmd_len--;
         print("\b \b");
       }
     } else if (c >= 32 && c < 127 && cmd_len < 126) {
+      /* Printable ASCII: append to buffer and echo to window.
+       * Limit is 126 (not 127) to leave room for the NUL terminator. */
       cmd_buf[cmd_len++] = c;
       buf[0] = c;
       buf[1] = 0;
