@@ -149,3 +149,26 @@ The W3+ actionable tier (**72 findings**) is filed as individual GitHub issues o
 Each issue body carries the `file:line` location, the finding text (maintainer-corrected),
 and a pointer to its subsystem doc + this index. They are the unit of work for the
 delegated fix phase (Phase 3).
+
+## 8. Phase 3 — fixes landed (branch `comprehensive-review`)
+
+Each verified by build (both arches) + headless QEMU runtime, committed separately,
+delegated one-agent-at-a-time and maintainer-verified before commit.
+
+| Commit | Fix | Issue |
+|---|---|---|
+| `0c5dc0a` | amd64 read full 64-bit PCI BAR (virtio.c + hal.c) + `arch_vmm_map_device` | **#44** (W5) ✅ |
+| `89c3a52` | amd64 clone high device-MMIO PML4 entries into process PGDs (fixes ≥4G `0xc0…` fault) | part of #94 ✅ |
+| `fedd9e2` | amd64 detect PVH via `hvm_start_info.magic` → real memory map (up to 4GB+) | **#28, #29** ✅ |
+| `8b03255` | amd64 `*(.lbss*)`→`.bss` so PMM metadata no longer overlaps `cpu_data` (SMP `current_task` page-fault) | runtime-discovered ✅ |
+| `b3ea74f` | aarch64 real DTB via `-dtb`/raw `kernel.bin` (FDT works, `x0` set) + SMP fallback cap 64→8; `-m 5G` default both arches | runtime-discovered ✅ |
+
+**Verified runtime status now:** amd64 boots clean at `-m 3G / 5G / 8G` (detects 6–9 GB,
+virtio-blk + Ext4, 4 SMP cores, no faults); aarch64 FDT-driven (real RAM + CPU count),
+boots to the TTY shell.
+
+**Remaining (open):** IPC→64-bit (not started — the delegated agent stopped before
+editing; the system works without it); amd64 ACPI-MADT CPU count (ARCH-01), real
+PCI/ACPI (ARCH-02), user-vs-kernel fault isolation (EXC-AMD64-02); the kernel/userland
+higher-half **addressing rework**; and re-commenting the headers + `.S` files that were
+reverted in Phase 2 (the C sources are commented and committed).
