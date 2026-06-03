@@ -20,9 +20,6 @@
  * allocation sizes (see USR-MALLOC-03/04).
  *
  * Known issues:
- *   USR-MALLOC-01 (W3 SECURITY) calloc() multiplies nmemb*size with no
- *                 overflow check; large nmemb causes undersized allocation
- *                 and the caller overflows the short buffer (heap corruption).
  *   USR-MALLOC-02 (W2 BAD-IMPL) Forward coalescing assumes block->next is
  *                 physically contiguous with current block.  Only true if
  *                 next was split from current; false for separately sbrk'd
@@ -228,18 +225,19 @@ void *realloc(void *ptr, size_t size) {
 /*
  * calloc - allocate nmemb*size bytes, zeroed.
  *
- * NOTE(USR-MALLOC-01): No integer overflow check on the multiply.  If
- * nmemb * size wraps (e.g. nmemb=0x80000001, size=2 on 32-bit; or
- * large values on 64-bit), 'total' is a small number.  malloc(total)
- * succeeds and returns a small buffer.  The CALLER then writes nmemb*size
- * bytes into it, overflowing the heap.  This is a classic calloc overflow
- * leading to heap corruption.
- *
- * Fix: add `if (nmemb && size > SIZE_MAX / nmemb) return NULL;` before the
- * multiply.
+ * FIX(USR-MALLOC-01): the nmemb*size product is overflow-checked before the
+ * multiply runs.  Without the guard a wrapping product yields a small 'total',
+ * malloc() returns an undersized buffer, and the caller's subsequent nmemb*size
+ * write overflows the heap (classic calloc overflow -> heap corruption).  The
+ * pre-multiply form (size > SIZE_MAX / nmemb) rejects exactly the inputs whose
+ * product would wrap, without relying on the wraparound having already happened;
+ * legitimate calls are unaffected.  nmemb==0 short-circuits to malloc(0)->NULL,
+ * preserving the prior behaviour for zero-count requests.
  */
 void *calloc(size_t nmemb, size_t size) {
-    size_t total = nmemb * size;  /* NOTE(USR-MALLOC-01): no overflow check */
+    if (nmemb != 0 && size > SIZE_MAX / nmemb) return NULL;  /* FIX(USR-MALLOC-01) */
+
+    size_t total = nmemb * size;
     void *ptr = malloc(total);
     if (ptr) {
         memset(ptr, 0, total);
