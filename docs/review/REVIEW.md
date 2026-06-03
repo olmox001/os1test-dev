@@ -162,6 +162,13 @@ delegated one-agent-at-a-time and maintainer-verified before commit.
 | `fedd9e2` | amd64 detect PVH via `hvm_start_info.magic` → real memory map (up to 4GB+) | **#28, #29** ✅ |
 | `8b03255` | amd64 `*(.lbss*)`→`.bss` so PMM metadata no longer overlaps `cpu_data` (SMP `current_task` page-fault) | runtime-discovered ✅ |
 | `b3ea74f` | aarch64 real DTB via `-dtb`/raw `kernel.bin` (FDT works, `x0` set) + SMP fallback cap 64→8; `-m 5G` default both arches | runtime-discovered ✅ |
+| `3f9f81f` | userland `calloc(nmemb,size)` integer-overflow guard (pre-multiply `size > SIZE_MAX/nmemb` check) | **#80** (W3) ✅ |
+| `c6c268a` | bound user-supplied I/O buffer size at 16 MiB before `kmalloc` (FILE_WRITE/READ/LIST_DIR, cases 251/252/254) | **#62** (W3) ✅ |
+
+The last two rows begin the **W3 issue-tier** fix phase (smaller, correctness/security
+hardening on the issue backlog), distinct from the boot/crash fixes above. Both are pure
+additive guards verified by build (both arches) + boot (no regression); their capped/overflow
+paths are not exercised at boot, so they are build + no-regression + correct-by-inspection.
 
 **Verified runtime status now:** amd64 boots clean at `-m 3G / 5G / 8G` (detects 6–9 GB,
 virtio-blk + Ext4, 4 SMP cores, no faults); aarch64 FDT-driven (real RAM + CPU count),
