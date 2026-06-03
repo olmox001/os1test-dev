@@ -175,6 +175,30 @@ void arch_vmm_map_mmio(uint64_t *pgd) {
 }
 
 /*
+ * arch_vmm_map_device - identity-map a device MMIO region [base, base+size)
+ * into the active kernel page tables as uncached device memory (PCD|PWT).
+ *
+ * FIX(DRV-VIRTIO-01 / AMMU-07): called by the amd64 PCI scan for a device's
+ * BAR so the region is reachable even when QEMU places a 64-bit BAR ABOVE 4 GB
+ * (e.g. with '-m 4G'), which the fixed 0xFE000000-0xFFFFFFFF window misses.
+ * Identity (VA==PA), consistent with the rest of the amd64 MMU model.
+ */
+int arch_vmm_map_device(uint64_t base, uint64_t size);
+int arch_vmm_map_device(uint64_t base, uint64_t size) {
+  extern uint64_t *kernel_pgd;
+  if (!base || !size)
+    return -1;
+  uint64_t start = base & ~0xFFFUL;
+  uint64_t end = (base + size + 0xFFFUL) & ~0xFFFUL;
+  for (uint64_t a = start; a < end; a += 4096) {
+    arch_vmm_map((uint64_t)kernel_pgd, a, a,
+                 X86_PTE_P | X86_PTE_RW | X86_PTE_PCD | X86_PTE_PWT);
+  }
+  arch_tlb_flush_all();
+  return 0;
+}
+
+/*
  * arch_vmm_init - early VMM initialisation (boot path).
  *
  * Called before arch_vmm_init_hw.  At this point boot_pml4 (set up by start.S)

@@ -52,7 +52,19 @@ static void amd64_pci_callback(int bdf, uint16_t vendor, uint16_t device_id) {
     bool is_modern = (vendor == 0x1AF4 && device_id >= 0x1041);
     
     if (is_modern && b4 != 0 && !(b4 & 1)) {
-        dev.base = b4 & ~0xF;
+        /* FIX(DRV-VIRTIO-01): read the FULL 64-bit BAR. For a 64-bit memory BAR
+         * (type bits [2:1] == 0b10) the high 32 bits live in BAR5; reading only
+         * BAR4 truncates the base when QEMU places it above 4GB ('-m 4G'),
+         * yielding a wrong dev.base -> virtio reads QUEUE_NUM_MAX as 0 -> crash. */
+        dev.base = (uintptr_t)(b4 & ~0xFU);
+        if ((b4 & 0x6) == 0x4) { /* 64-bit memory BAR */
+            uint32_t b5 = pci_get_bar(bdf, 5);
+            dev.base |= ((uintptr_t)b5 << 32);
+        }
+        /* FIX(AMMU-07): map the BAR MMIO so it is reachable even above 4GB
+         * (the fixed 0xFE000000-0xFFFFFFFF identity window does not cover it). */
+        extern int arch_vmm_map_device(uint64_t base, uint64_t size);
+        arch_vmm_map_device(dev.base, 0x10000);
     } else {
         dev.base = b0;
         if (dev.base & 1) dev.base &= ~3;
