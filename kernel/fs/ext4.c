@@ -46,11 +46,10 @@
  *            real and persists to disk.  The comment at ext4_read_inode also
  *            says "Supports Direct and Single Indirect" but double-indirect
  *            is fully implemented (blocks 1036–1 049 611).
- *   EXT4-04  (W3 BUG) struct ext4_group_desc is 34 bytes (20 named + padding
- *            [14]), not 32.  The on-disk GDT entry is 32 bytes.  The write-
- *            back at ext4_alloc_block copies 34 bytes into the 512-byte GDT
- *            sector buffer, overwriting 2 bytes of GDT entry 1.  Latent on
- *            single-group images; corrupting on multi-group images.
+ *   EXT4-04  (W3 BUG, FIXED) struct ext4_group_desc was 34 bytes (20 named +
+ *            padding[14]); the on-disk GDT entry is 32 bytes, so the write-
+ *            back at ext4_alloc_block clobbered 2 bytes of GDT entry 1 on
+ *            multi-group images.  Now padding[12] => exactly 32 bytes.
  *   EXT4-05  (W3 MISSING) Write path rejects block_idx >= 12; write ceiling
  *            is 12 × 4096 = 49 152 bytes (48 KB).  Read supports up to ~4 GB.
  *   EXT4-06  (W3 MISSING) s_feature_incompat and s_feature_ro_compat are
@@ -100,9 +99,9 @@ static uint64_t part_start_lba;
 static struct ext4_superblock sb;
 /* bg: in-memory copy of block group descriptor 0.
  * Loaded from LBA part_start_lba+8 (block 1 = bytes 4096–4095+512).
- * NOTE(EXT4-04): sizeof(struct ext4_group_desc) == 34 bytes, not 32.  The
- * on-disk GDT entry is 32 bytes.  Write-back copies 34 bytes, overwriting
- * 2 bytes of GDT entry 1 on multi-group images.
+ * EXT4-04 (fixed): sizeof(struct ext4_group_desc) == 32 bytes (padding[12]),
+ * matching the on-disk GDT entry; read and write-back no longer touch the
+ * adjacent GDT entry 1.
  * NOTE(EXT4-12): only one group descriptor is held; multi-group images are
  * not supported. */
 static struct ext4_group_desc bg;
@@ -172,10 +171,9 @@ static int ext4_bwrite(uint64_t sector, uint32_t count, void *buf) {
  *   - Modifies the global bg and sb structs.
  *   - Acquires/releases ext4_lock with IRQ save/restore.
  *
- * NOTE(EXT4-04): memcpy(bg_buf, &bg, sizeof(bg)) copies 34 bytes (not 32)
- *   into bg_buf[0..33].  On a multi-group image ext4_bwrite then persists
- *   bg_buf[32..33] (2 bytes of bg.padding) over bg_block_bitmap_lo[0:1]
- *   of GDT entry 1.  Latent on the single-group test image.
+ * EXT4-04 (fixed): memcpy(bg_buf, &bg, sizeof(bg)) now copies exactly 32
+ *   bytes into bg_buf[0..31], so the write-back no longer persists over
+ *   bg_block_bitmap_lo[0:1] of GDT entry 1 on multi-group images.
  * NOTE(EXT4-13): Bitmap scan always searches group 0 regardless of
  *   bg_free_blocks_count_lo; no multi-group allocation.
  */
@@ -253,10 +251,10 @@ static uint32_t ext4_alloc_block(void) {
   sb.s_free_blocks_count_lo--;
 
   /* Write-back group descriptor 0: read the 512-byte GDT sector (LBA
-   * part_start_lba + 8), overwrite the first sizeof(bg)==34 bytes with the
+   * part_start_lba + 8), overwrite the first sizeof(bg)==32 bytes with the
    * updated bg, then write the sector back.
-   * NOTE(EXT4-04): sizeof(struct ext4_group_desc)==34, not 32.  On a
-   * multi-group image the 34-byte copy overwrites 2 bytes of GDT entry 1. */
+   * EXT4-04 (fixed): sizeof(struct ext4_group_desc)==32 now, matching the
+   * on-disk entry, so the copy no longer touches GDT entry 1. */
   uint8_t *bg_buf = kmalloc(512);
   if (bg_buf && ext4_bread(part_start_lba + 8, 1, bg_buf) == 0) {
     memcpy(bg_buf, &bg, sizeof(bg)); /* Update BG0 in place */
@@ -314,9 +312,8 @@ static uint32_t ext4_alloc_block(void) {
  *      sector = 4096 / 512 = 8).  The GDT starts at block 1 for 4 KB-block
  *      filesystems (superblock in block 0 at offset 1024; GDT immediately
  *      after the superblock block).
- *   5. memcpy sizeof(struct ext4_group_desc) == 34 bytes into global bg.
- *      NOTE(EXT4-04): 34 bytes read from a 32-byte on-disk entry; padding[14]
- *      ingests 2 bytes past the entry boundary (harmless on read path).
+ *   5. memcpy sizeof(struct ext4_group_desc) == 32 bytes into global bg,
+ *      matching the on-disk entry (EXT4-04 fixed; was 34 via padding[14]).
  *
  * Preconditions:
  *   - gpt_init() must have completed and partitions[2] must be valid.
@@ -372,9 +369,8 @@ void ext4_init(void) {
   /* Block 1 byte offset from partition start: 1 × 4096 = 4096 bytes
    * = 4096 / 512 = 8 sectors from the partition's LBA 0.
    * We read only 1 sector (512 bytes); GDT entry 0 occupies the first 32
-   * on-disk bytes, but sizeof(struct ext4_group_desc) == 34, so memcpy
-   * below ingests 34 bytes.  NOTE(EXT4-04): the extra 2 bytes come from
-   * the next GDT entry's first 2 bytes (harmless on read; corrupt on write). */
+   * on-disk bytes, and sizeof(struct ext4_group_desc) == 32 now (EXT4-04
+   * fixed), so memcpy below ingests exactly the 32-byte entry. */
   if (virtio_blk_read(k_buf, part_start_lba + 8, 1) != 0) {
     pr_err("%s", "Ext4: Failed to read GDT\n");
     kfree(k_buf);
