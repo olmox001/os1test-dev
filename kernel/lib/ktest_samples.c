@@ -20,9 +20,9 @@
  *   __ktests_end for ktest_run_all() to iterate.
  *
  * KASSERT_EQ / KASSERT failure:
- *   If any assertion fails, the KASSERT macro prints a failure message and
- *   returns from the test function.  Due to NOTE(LIB-KTEST-01), the runner
- *   then prints "PASS" and counts the test as passed regardless.
+ *   If any assertion fails, the KASSERT macro prints a failure message, sets
+ *   ktest_test_failed, and returns from the test function; the runner then
+ *   counts the test as FAILED (LIB-KTEST-01 fixed).
  *
  * Known issues:
  *   None specific to this file.  Test reporting accuracy depends on the runner

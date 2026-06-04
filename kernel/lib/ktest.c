@@ -16,20 +16,18 @@
  *
  * KASSERT behaviour:
  *   KASSERT(cond) in test.h expands to:
- *     if (!(cond)) { printk(...FAIL...); return; }
- *   When a KASSERT fires, the test function returns early — control returns
- *   to ktest_run_all() at the line AFTER test->func().  The runner then
- *   unconditionally prints "PASS" and increments passed.
+ *     if (!(cond)) { printk(...FAIL...); ktest_test_failed = 1; return; }
+ *   When a KASSERT fires, the test function sets ktest_test_failed and returns
+ *   early.  ktest_run_all() clears the flag before each test and checks it
+ *   after test->func() to record a real PASS or FAIL.
  *
- * Known issues:
- *   LIB-KTEST-01  (W3 BUG)  ktest_run_all() always prints "PASS" and
- *                increments `passed` after test->func() returns, regardless of
- *                whether the test exited via KASSERT (failure) or ran to
- *                completion (success).  The final summary always reports
- *                N PASSED / 0 FAILED even when tests have failed.  The KASSERT
- *                failure message IS printed (via printk) but is not counted.
- *                Fix: add a ktest_failed counter; have KASSERT increment it
- *                and set a per-test flag that ktest_run_all() checks.
+ * Fixed issues:
+ *   LIB-KTEST-01  (W3 BUG, FIXED)  ktest_run_all() previously printed "PASS"
+ *                and incremented `passed` after test->func() returned, regardless
+ *                of whether the test exited via KASSERT.  Now KASSERT sets the
+ *                ktest_test_failed flag (test.h); the runner clears it before
+ *                each test and, after test->func(), records a real PASS or FAIL.
+ *                The summary now reports accurate PASSED / FAILED counts.
  */
 #include <kernel/test.h>
 #include <kernel/printk.h>
@@ -40,19 +38,22 @@
 extern ktest_case_t __ktests_start[];
 extern ktest_case_t __ktests_end[];
 
+/* LIB-KTEST-01: a test sets this (via KASSERT in test.h) when an assertion
+ * fails.  ktest_run_all() clears it before each test and checks it after. */
+volatile int ktest_test_failed = 0;
+
 /*
  * ktest_run_all - run every KTEST_CASE registered in the .ktests section.
  *
  * Iterates from __ktests_start to __ktests_end.  For each entry:
  *   1. Prints "[KTEST] Running: <name>... ".
- *   2. Calls test->func().
- *   3. Prints "PASS" and increments passed.
+ *   2. Clears ktest_test_failed, then calls test->func().
+ *   3. Prints "PASS" or "FAIL" per the ktest_test_failed flag and counts it.
  * After all tests, prints the pass/fail summary.
  *
- * NOTE(LIB-KTEST-01): Step 3 runs unconditionally, even if test->func()
- *   returned early via KASSERT.  The `count - passed` in the summary is
- *   therefore always 0 — the FAILED count is never non-zero.  Failures are
- *   visible only from the KASSERT printk message, not the summary line.
+ * LIB-KTEST-01 (fixed): step 3 checks the ktest_test_failed flag set by KASSERT,
+ *   so a test that returned early is counted as FAILED and the summary reports
+ *   accurate PASSED / FAILED counts.
  *
  * No crash recovery: if a test triggers a kernel panic or fault, the machine
  * halts.  The comment "setjmp/longjmp" notes the direction for future hardening.
@@ -63,6 +64,7 @@ extern ktest_case_t __ktests_end[];
 void ktest_run_all(void) {
     size_t count = __ktests_end - __ktests_start;
     size_t passed = 0;
+    size_t failed = 0;
 
     printk("\n[KTEST] Starting Kernel Unit Tests (%d cases found)...\n", (int)count);
 
@@ -72,17 +74,20 @@ void ktest_run_all(void) {
         /* Note: This is a simplified runner. In a real system, we might want
          * to use setjmp/longjmp for crash recovery in tests.
          */
+        ktest_test_failed = 0;
         test->func();
 
-        /* NOTE(LIB-KTEST-01): "PASS" is always printed here.  If test->func()
-         * returned early via KASSERT, this line still executes, producing a
-         * misleading "PASS" line after the KASSERT failure message. */
-        printk("PASS\n");
-        passed++;
+        /* LIB-KTEST-01: a test that returned early via KASSERT set
+         * ktest_test_failed; count it as FAILED instead of an unconditional PASS. */
+        if (ktest_test_failed) {
+            printk("FAIL\n");
+            failed++;
+        } else {
+            printk("PASS\n");
+            passed++;
+        }
     }
 
-    /* NOTE(LIB-KTEST-01): (count - passed) is always 0; the FAILED count is
-     * never incremented.  Real failures are lost in the summary. */
     printk("[KTEST] Completed. Summary: %d PASSED, %d FAILED\n\n",
-           (int)passed, (int)(count - passed));
+           (int)passed, (int)failed);
 }
