@@ -44,11 +44,10 @@
  *               size calculation overflows and size < expected passes
  *               spuriously.  Fix: copy the blob into kmalloc'd kernel memory
  *               inside sys_set_font, validate all internal offsets.
- *   GFX-FONT-02 (W3 BUG) graphics_font_height() returns ascent+descent with
- *               no zero check.  A malformed font loaded via sys_set_font with
- *               ascent=0 and descent=0 causes a divide-by-zero in
- *               compositor_create_window (h / char_h, compositor.c:204).
- *               Fix: validate ascent+descent > 0 in sys_set_font.
+ *   GFX-FONT-02 (W3 BUG, FIXED) graphics_font_height() floors to the built-in
+ *               default height when ascent+descent <= 0, so a malformed font
+ *               (ascent=descent=0 via sys_set_font) can no longer divide-by-zero
+ *               in compositor_create_window (h / char_h, compositor.c:204).
  */
 #include <graphics/gl.h>
 #include <kernel/graphics.h>
@@ -272,9 +271,10 @@ int graphics_string_width(const char *str) {
  * Returns ascent + descent in pixels.  Used as char_h in compositor for row
  * count and scroll arithmetic.
  *
- * NOTE(GFX-FONT-02): does not validate that ascent+descent > 0.  A malformed
- *   font loaded via sys_set_font with both fields zero causes a divide-by-zero
- *   at compositor_create_window (h / char_h).  Fix: check in sys_set_font.
+ * GFX-FONT-02 (fixed): floors to the built-in default height when
+ *   ascent+descent <= 0, so a malformed font (both fields zero, via
+ *   sys_set_font) can no longer cause a divide-by-zero at
+ *   compositor_create_window (h / char_h).
  *
  * Locking: none; reads current_font.header (not IRQ-safe under sys_set_font
  *          race, see GFX-FONT-01).
@@ -283,7 +283,12 @@ int graphics_string_width(const char *str) {
  * Get font height
  */
 int graphics_font_height(void) { 
-    return current_font.header.ascent + current_font.header.descent; 
+    /* GFX-FONT-02: floor to the built-in default height so a malformed font
+     * (ascent=descent=0 via sys_set_font) cannot make char_h==0 and trigger a
+     * divide-by-zero in compositor row/scroll arithmetic — mirrors the
+     * graphics_font_max_width() floor. */
+    int h = current_font.header.ascent + current_font.header.descent;
+    return h > 0 ? h : (FONT_ASCENT + FONT_DESCENT); 
 }
 
 /*
