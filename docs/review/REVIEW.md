@@ -207,3 +207,42 @@ amd64 ACPI-MADT CPU count (ARCH-01), real PCI/ACPI init (ARCH-02), user-vs-kerne
 fault isolation (EXC-AMD64-02); the kernel/userland higher-half **addressing rework**
 (the central PA==VA invariant); W^X (MM-VMM-01/AMMU-01); and re-commenting the headers
 + `.S` files reverted in Phase 2 (all C sources are commented and committed).
+
+## 9. amd64 runtime crashes — root-caused (fix pending)
+
+Two amd64 defects were precisely root-caused via headless QEMU + interactive `make run`
+(serial capture, `addr2line`, an in-#PF-handler PGD walk). Both remain **open**: the
+experimental fixes were **reverted** to keep the tree at the verified known-good state (the
+§8 fixes), because the teardown fix was only robust with debug-`printk` timing (a residual
+SMP race re-appeared once the markers were removed). Recorded here with the exact mechanism
+and fix direction for a focused follow-up.
+
+**SCHED-UAF-01 — process-teardown use-after-free; crash on window-close (both arches).**
+Closing a window (compositor close button → `process_terminate`) can leave the terminated
+process **still linked in a per-CPU runqueue** when its `struct process` page is freed (and
+PMM-poisoned `0xCC`). `schedule()`'s O(1) pick and the **work-stealing** path then
+dereference the freed node — `addr2line` pins the aarch64 fault to `schedule()` at
+`kernel/sched/process.c:937` (`next->priority` on a poisoned struct) → data-abort (aarch64)
+/ GPF→triple-fault→reboot (amd64). *Repro:* `make run`, spawn `demo3d`/`doom`, click its
+close (X). *Related:* the compositor calls `process_terminate` from **mouse-IRQ context**
+(its header says "IRQ context: no") — SCHED-03 / GFX-COMP-13 companion. *Fix direction:*
+remove the process from **all** runqueues (under the correct per-CPU `sched_lock`) and ensure
+no reference remains before the struct is freed (quiesce/epoch or refcount); refuse to
+(re)enqueue a DEAD/ZOMBIE process; pair with a **reliable non-IRQ reaper** (a kernel thread).
+A "defer the kill + drain in `idle_task_entry`" workaround is **insufficient** — the drain
+only runs when a CPU goes idle, so the close button silently does nothing when all CPUs are
+busy (observed on aarch64).
+
+**ARCH-AMD64-APPGD-01 — APs run on the stale boot PML4 → high device-MMIO faults.**
+`start.S` has `kernel_pgd_phys: .quad boot_pml4`, and `arch_cpu_wake_secondary`
+(`platform.c` ~:459) launches APs with CR3 = `kernel_pgd_phys`. But `arch_vmm_init_hw` /
+`vmm_dynamic_remap` switch the BSP to a **new dynamic `kernel_pgd`** (the one
+`arch_vmm_map_device` later populates with the >4GB virtio BARs at `PML4[1]`);
+`kernel_pgd_phys` is never updated. APs therefore run on **`boot_pml4`**, whose `PML4[1]` is
+absent → a device IRQ touching high MMIO from an AP/idle (e.g. the virtio-input ISR at
+`0xc000005000`) page-faults. *Confirmed:* an in-#PF PGD walk showed `cr3=boot_pml4
+(≠ kernel_pgd)`, `PML4[1]=0` while `kernel_pgd PML4[1]` is present. *Fix direction:* set the
+AP trampoline CR3 to the current dynamic `kernel_pgd` (`(uint32_t)(uintptr_t)kernel_pgd` —
+identity-mapped, VA==PA) in `arch_cpu_wake_secondary`, or update `kernel_pgd_phys` after the
+dynamic remap. (Verified no-regression in isolation — 4 APs still come online — but it was
+bundled with the reverted SCHED-UAF work, so it is not committed.)

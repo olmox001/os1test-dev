@@ -273,7 +273,7 @@ USER_MALLOC_O  = $(BUILD_DIR)/$(USER_SYS_DIR)/lib/malloc.o
 
 # System ELFs (placed in /sys/bin)
 SYS_ELFS = $(BUILD_DIR)/init.elf $(BUILD_DIR)/shell.elf $(BUILD_DIR)/notify_srv.elf \
-           $(BUILD_DIR)/regedit.elf $(BUILD_DIR)/fontman.elf
+           $(BUILD_DIR)/regedit.elf $(BUILD_DIR)/fontman.elf  $(BUILD_DIR)/nexs-fm.elf
 
 # User ELFs (placed in /bin)
 BIN_ELFS = $(BUILD_DIR)/counter.elf $(BUILD_DIR)/demo3d.elf $(BUILD_DIR)/ipc_send.elf \
@@ -314,6 +314,15 @@ $(BUILD_DIR)/regedit.elf: $(BUILD_DIR)/$(USER_DIR)/sys/bin/regedit.o $(USER_LIB_
 $(BUILD_DIR)/writetest.elf: $(BUILD_DIR)/$(USER_DIR)/bin/writetest.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/input_test.elf: $(BUILD_DIR)/$(USER_DIR)/bin/input_test.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/fontman.elf: $(BUILD_DIR)/$(USER_DIR)/sys/bin/fontman/fontman.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
+
+$(BUILD_DIR)/nexs-fm.elf: $(BUILD_DIR)/$(USER_DIR)/sys/bin/nexs-fm/main.o \
+                          $(BUILD_DIR)/$(USER_DIR)/sys/bin/nexs-fm/state.o \
+                          $(BUILD_DIR)/$(USER_DIR)/sys/bin/nexs-fm/sort.o \
+                          $(BUILD_DIR)/$(USER_DIR)/sys/bin/nexs-fm/ui.o \
+                          $(BUILD_DIR)/$(USER_DIR)/sys/bin/nexs-fm/draw.o \
+                          $(BUILD_DIR)/$(USER_DIR)/sys/bin/nexs-fm/events.o \
+                          $(BUILD_DIR)/$(USER_DIR)/sys/bin/nexs-fm/fileops.o \
+                          $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 
 $(BUILD_DIR)/$(USER_DIR)/sys/bin/fontman/%.o: $(USER_DIR)/sys/bin/fontman/%.c
 	@mkdir -p $(dir $@)

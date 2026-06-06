@@ -104,6 +104,38 @@ static void shell_redraw(void) {
 }
 
 /*
+ * spawn_search - try to spawn 'name' searching /bin/ then /sys/bin/.
+ *
+ * If name starts with '/' it is used as an absolute path directly.
+ * Otherwise the function tries "/bin/<name>" first; if spawn() returns
+ * <= 0 it retries with "/sys/bin/<name>".
+ *
+ * On success, *out_path (size PATH_MAX=64) is filled with the resolved
+ * path and the PID is returned.  On failure returns <= 0 and *out_path
+ * holds the last attempted path (useful for error messages).
+ *
+ * NOTE(USR-SEC-03): spawn() grants the new process full ambient authority;
+ * no sandboxing applies regardless of the directory searched.
+ */
+#define SPAWN_PATH_MAX 64
+static int spawn_search(const char *name, char *out_path) {
+  if (name[0] == '/') {
+    snprintf(out_path, SPAWN_PATH_MAX, "%s", name);
+    return spawn(out_path);
+  }
+
+  /* Try /bin/ first */
+  snprintf(out_path, SPAWN_PATH_MAX, "/bin/%s", name);
+  int pid = spawn(out_path);
+  if (pid > 0)
+    return pid;
+
+  /* Fall back to /sys/bin/ */
+  snprintf(out_path, SPAWN_PATH_MAX, "/sys/bin/%s", name);
+  return spawn(out_path);
+}
+
+/*
  * process_command - parse and dispatch the accumulated line in cmd_buf.
  *
  * NUL-terminates cmd_buf at cmd_len, then matches against a linear chain of
@@ -111,12 +143,12 @@ static void shell_redraw(void) {
  *
  * Dispatch strategy (NOTE USR-SHELL-01):
  *   - Fixed-word commands ("help", "clear", "time", etc.) use str_eq().
- *   - Commands with arguments ("ls", "cd", "cat", "kill", "notify") detect
- *     the command prefix by inspecting individual characters (cmd_buf[0..N])
- *     and extract the argument via hardcoded byte offsets (e.g. &cmd_buf[3]
- *     for "ls <path>", &cmd_buf[4] for "cat <path>").  There is no tokeniser.
- *   - Unknown tokens are tried as ELF paths: relative names are prefixed with
- *     "/bin/" and passed to spawn().  There is no PATH search.
+ *   - Commands with arguments ("ls", "cd", "cat", "kill", "notify", "exec")
+ *     detect the command prefix by inspecting individual characters
+ *     (cmd_buf[0..N]) and extract the argument via hardcoded byte offsets.
+ *     There is no tokeniser.
+ *   - Unknown tokens are tried as ELF names via spawn_search(), which probes
+ *     /bin/ then /sys/bin/ before reporting failure.
  *
  * On return, cmd_len is reset to 0 (erases the accumulated line).
  *
@@ -131,20 +163,21 @@ static void process_command(void) {
 
   if (str_eq(cmd_buf, "help") || str_eq(cmd_buf, "?")) {
     print("\n\033[1;33mAvailable Commands:\033[0m\n");
-    print("  help       - Show this help\n");
-    print("  clear      - Clear screen\n");
-    print("  time       - Show uptime\n");
-    print("  demo       - Draw 2D shapes\n");
-    print("  demo3d     - Launch 3D cube demo\n");
-    print("  shell      - Open new shell window\n");
-    print("  ps         - List processes\n");
-    print("  ls [path]  - List directory contents\n");
-    print("  cd <path>  - Change directory\n");
-    print("  pwd        - Show current directory\n");
-    print("  cat <path> - Show file contents\n");
-    print("  kill <pid> - Kill process by PID\n");
-    print("  about      - About this OS\n");
-    print("  exit       - Exit shell\n");
+    print("  help            - Show this help\n");
+    print("  clear           - Clear screen\n");
+    print("  time            - Show uptime\n");
+    print("  demo            - Draw 2D shapes\n");
+    print("  demo3d          - Launch 3D cube demo\n");
+    print("  shell           - Open new shell window\n");
+    print("  ps              - List processes\n");
+    print("  ls [path]       - List directory contents\n");
+    print("  cd <path>       - Change directory\n");
+    print("  pwd             - Show current directory\n");
+    print("  cat <path>      - Show file contents\n");
+    print("  kill <pid>      - Kill process by PID\n");
+    print("  exec <program>  - Execute program (searches /bin, /sys/bin)\n");
+    print("  about           - About this OS\n");
+    print("  exit            - Exit shell\n");
   } else if (str_eq(cmd_buf, "clear")) {
     print("\033[2J\033[H");
     shell_redraw();
@@ -177,11 +210,13 @@ static void process_command(void) {
     }
   } else if (str_eq(cmd_buf, "ps")) {
     proce_display_list(my_window);
-  } else if (str_eq(cmd_buf, "ls") || (cmd_buf[0] == 'l' && cmd_buf[1] == 's' && cmd_buf[2] == ' ')) {
+  } else if (str_eq(cmd_buf, "ls") ||
+             (cmd_buf[0] == 'l' && cmd_buf[1] == 's' && cmd_buf[2] == ' ')) {
     /* NOTE(USR-SHELL-01): Argument parsed with hardcoded byte offsets.
      * "ls" alone uses "."; "ls <path>" takes &cmd_buf[3] as the path. */
     const char *path = ".";
-    if (cmd_buf[2] == ' ') path = &cmd_buf[3];
+    if (cmd_buf[2] == ' ')
+      path = &cmd_buf[3];
     char buf[1024];
     int len = list_dir(path, buf, sizeof(buf));
     if (len < 0) {
@@ -197,11 +232,13 @@ static void process_command(void) {
     } else {
       print("Error getting CWD\n");
     }
-  } else if (cmd_buf[0] == 'c' && cmd_buf[1] == 'd' && (cmd_buf[2] == ' ' || cmd_buf[2] == '\0')) {
+  } else if (cmd_buf[0] == 'c' && cmd_buf[1] == 'd' &&
+             (cmd_buf[2] == ' ' || cmd_buf[2] == '\0')) {
     /* NOTE(USR-SHELL-01): "cd" with no argument defaults to "/"; argument
      * at &cmd_buf[3] (hardcoded offset after "cd "). */
     const char *path = "/";
-    if (cmd_buf[2] == ' ') path = &cmd_buf[3];
+    if (cmd_buf[2] == ' ')
+      path = &cmd_buf[3];
     if (chdir(path) != 0) {
       printf("cd: no such directory: %s\n", path);
     }
@@ -259,20 +296,50 @@ static void process_command(void) {
       else
         print("\n");
     }
-  } else {
-    /* Unknown command: try to spawn it as an ELF.
-     * Absolute paths (starting with '/') are used as-is; relative names are
-     * prefixed with "/bin/".  There is no PATH search and no shell scripting.
-     * NOTE(USR-SEC-03): spawn() grants the new process full ambient authority
-     * (arbitrary IPC, kill, registry, spawn); no sandboxing applies. */
-    char path[64];
-    /* Prepend / if not present */
-    if (cmd_buf[0] == '/')
-      snprintf(path, sizeof(path), "%s", cmd_buf);
-    else
-      snprintf(path, sizeof(path), "/bin/%s", cmd_buf);
 
-    int pid = spawn(path);
+    /*
+     * exec <program> [args-not-yet-supported]
+     *
+     * Spawns the named ELF as a new child process, searching /bin/ then
+     * /sys/bin/ for relative names (absolute paths bypass the search).
+     *
+     * Unlike a POSIX exec(3) this does NOT replace the shell process — it
+     * uses spawn() which creates a new child; the shell continues running.
+     * Renaming this to "run" in a future cleanup would avoid the semantic
+     * confusion, but "exec" matches user expectations for "execute this
+     * program by name".
+     *
+     * NOTE(USR-SHELL-01): argument parsed at hardcoded offset cmd_buf[5].
+     * NOTE(USR-SEC-03): spawn() grants full ambient authority; no sandbox.
+     */
+  } else if (cmd_buf[0] == 'e' && cmd_buf[1] == 'x' && cmd_buf[2] == 'e' &&
+             cmd_buf[3] == 'c' && cmd_buf[4] == ' ') {
+    char *arg = &cmd_buf[5];
+    if (*arg == '\0') {
+      print("Usage: exec <program>\n");
+    } else {
+      char path[SPAWN_PATH_MAX];
+      int pid = spawn_search(arg, path);
+      if (pid > 0) {
+        printf("Started %s (PID %d)\n", path, pid);
+      } else {
+        printf("exec: not found: %s\n", arg);
+      }
+    }
+
+  } else {
+    /*
+     * Unknown command: try to spawn it as an ELF name.
+     *
+     * spawn_search() probes /bin/<name> first, then /sys/bin/<name>.
+     * Absolute paths (starting with '/') are passed directly to spawn().
+     * There is no further PATH search and no shell scripting.
+     *
+     * NOTE(USR-SEC-03): spawn() grants the new process full ambient authority
+     * (arbitrary IPC, kill, registry, spawn); no sandboxing applies.
+     */
+    char path[SPAWN_PATH_MAX];
+    int pid = spawn_search(cmd_buf, path);
     if (pid > 0) {
       printf("Started %s (PID %d)\n", path, pid);
     } else {
@@ -330,10 +397,11 @@ int main(void) {
   write(3, "shell> ", 7); /* Mirror to UART */
 
   /* buf[1] always stays NUL so print(buf) terminates correctly after echoing
-   * a single printable character without calling strlen on uninitialized data. */
+   * a single printable character without calling strlen on uninitialized data.
+   */
   char buf[2] = {0, 0};
   while (running) {
-    long n = read(0, buf, 1);  /* Blocking read from keyboard fd */
+    long n = read(0, buf, 1); /* Blocking read from keyboard fd */
     if (n <= 0)
       continue;
 
