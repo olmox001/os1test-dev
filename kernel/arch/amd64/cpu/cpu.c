@@ -127,6 +127,22 @@ void arch_cpu_init(void) {
   }
 
   pr_info("AMD64 CPU %u initialized (GDT, IDT, Syscall, SSE, GS enabled)\n", id);
+
+  /* ARCH-AMD64-APPGD-01 (amd64 HAL only): the AP trampoline brings each AP up on
+   * the stale boot_pml4 (32-bit CR3), which lacks the >4GB device MMIO at
+   * PML4[1] (e.g. the virtio-input ISR window at 0xc000005000).  Once the live
+   * kernel_pgd exists (built by vmm_dynamic_remap + arch_vmm_map_device before
+   * SMP bringup), adopt it here so a device IRQ taken on this CPU cannot
+   * page-fault on the high MMIO and halt the core.  On the BSP's early
+   * cpu_init() call kernel_pgd is still NULL (VMM not up yet) -> no-op; the BSP
+   * already runs on kernel_pgd via vmm_dynamic_remap().  Confined to the amd64
+   * HAL; platform.c is untouched. */
+  {
+    extern uint64_t *kernel_pgd;
+    if (kernel_pgd)
+      __asm__ __volatile__("mov %0, %%cr3"
+                           :: "r"((uint64_t)(uintptr_t)kernel_pgd) : "memory");
+  }
 }
 
 /*
@@ -175,9 +191,24 @@ void arch_cpu_switch_context(struct process *next) {
   cpu->stack_top = next->kernel_stack;
   cpu->current_task = next;
 
-  /* Switch address space */
-  if (next->page_table) {
-    arch_vmm_set_pgd((uint64_t)next->page_table);
+  /* Switch address space.  A kernel thread (e.g. idle) has no private address
+   * space (page_table == NULL): switch it onto the shared kernel_pgd instead of
+   * leaving the PREVIOUS process's PGD active in CR3.
+   *
+   * SCHED-UAF-01 (interactive-close residual): if a CPU keeps a terminated
+   * process's PGD as CR3 — because it switched prev->idle and we skipped the
+   * reload — then when that process is reaped and its PGD pages are freed, the
+   * CPU is left executing on a freed PGD.  Its kernel low-half identity map
+   * (which includes printk) vanishes, so the next kernel fetch #PFs; the amd64
+   * #PF handler then calls printk, which #PFs again -> recursive fault ->
+   * stack overflow -> #DF -> triple fault.  That is the "Terminating process
+   * ... PID" -> instant reboot seen on window close.  Confined to the amd64 HAL. */
+  {
+    extern uint64_t *kernel_pgd;
+    uint64_t pgd = next->page_table ? (uint64_t)next->page_table
+                                    : (uint64_t)(uintptr_t)kernel_pgd;
+    if (pgd)
+      arch_vmm_set_pgd(pgd);
   }
 
   /* Update TSS RSP0 for interrupt stack switching */
