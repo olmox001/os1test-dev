@@ -97,7 +97,8 @@ Successfully tested on:
 
 ## Quick start
 
-### 1. Toolchain (bare-metal cross compilers + QEMU)
+### 1. Toolchain (bare-metal cross compilers + QEMU) 
+**NOTE** Compilation tested only on macOS Intel
 
 **macOS (Homebrew):**
 ```bash
