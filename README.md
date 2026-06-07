@@ -38,7 +38,36 @@ falls back to a hardcoded 1 GB; the full memory map / 4 GB works via the **GRUB-
 [#94 (amd64 boot/4GB)](https://github.com/olmox001/os1test-dev/issues/94) and the W5
 [#…(DRV-VIRTIO-01)]. **AArch64 is the reference "correct" platform.**
 
----
+## Highlights
+
+- ✅ Native support for AMD64 and AArch64
+- ✅ SMP (4+ cores)
+- ✅ User-space ELF64 applications
+- ✅ Ext4 filesystem
+- ✅ GPT partition support
+- ✅ VirtIO GPU / Input / Block
+- ✅ Graphical compositor and window manager
+- ✅ Multi-window desktop
+- ✅ TTY shell
+- ✅ Doom running as a user-space process
+- ✅ 3D rendering demo
+- ✅ Microkernel architecture
+
+## Verified Runtime
+
+Successfully tested on:
+
+| Platform | Status |
+|-----------|---------|
+| QEMU AArch64 virt | ✅ |
+| QEMU AMD64 q35 | ⚠️ | (instability of closing process)
+| SMP (4 cores) | ✅ |
+| VirtIO GPU | ✅ |
+| VirtIO Keyboard | ✅ |
+| VirtIO Mouse | ✅ |
+| VirtIO Block | ✅ |
+| GPT | ✅ |
+| Ext4 | ✅ |
 
 ## Features (what actually runs)
 
