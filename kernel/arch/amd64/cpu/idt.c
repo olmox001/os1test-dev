@@ -18,10 +18,11 @@
  *     (32-47) additionally calls pic_send_eoi() to deassert the 8259 output.
  *
  * Known issues:
- *   EXC-AMD64-01 (W2 MISSING/STUB) probe_in_progress / probe_failed are
- *     declared here but the x86 RIP-advance logic is unimplemented; the block
- *     falls through to the exception handler which halts.  The aarch64 path
- *     correctly advances ELR_EL1 (:cpu.c:75-79).  Dead code on amd64.
+ *   EXC-AMD64-01 RESOLVED (Phase A step 14): the dead probe-recovery block
+ *     and the amd64-local probe_in_progress/probe_failed flags were removed.
+ *     Memory probing is an aarch64-only fallback (FDT parse failure); its
+ *     flags and the working ELR_EL1 fixup live in aarch64/cpu/cpu.c.  amd64
+ *     gets its memory map from PVH/multiboot and never probes.
  *   EXC-AMD64-02 RESOLVED (Phase A): every vector 0-31 routes through
  *     fault_handle_user_or_panic (kernel/core/fault.c) — user faults
  *     terminate the process and schedule a successor; kernel faults dump,
@@ -290,18 +291,6 @@ static void amd64_double_fault_handler(struct pt_regs *regs) {
 extern struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *regs);
 extern struct pt_regs *kernel_timer_tick(struct pt_regs *regs);
 
-/* probe_in_progress / probe_failed — flags for safe memory probing.
- * NOTE(EXC-AMD64-01): probe_in_progress is never set to true on amd64
- * (only aarch64/platform.c:63 sets it).  The probe-recovery block below
- * (vec==14||vec==13 while probe_in_progress) is therefore unreachable dead
- * code.  Furthermore even if reached, no RIP adjustment is performed — the
- * code falls through to the normal exception handler and halts.  The aarch64
- * counterpart correctly increments ELR_EL1 by 4 to resume after the probe.
- * Fix: implement a fixup table or fixed-size probe stub so RIP can be advanced
- * by a known constant, then return regs instead of halting. */
-volatile bool probe_in_progress = false;
-volatile bool probe_failed = false;
-
 /*
  * amd64_isr_dispatch - central exception and interrupt dispatcher.
  *
@@ -311,17 +300,15 @@ volatile bool probe_failed = false;
  * switch by returning a different task's frame.
  *
  * Dispatch logic:
- *   vec < 32  : CPU exceptions.  Probe-recovery check (NOTE EXC-AMD64-01:
- *               dead on amd64), then switch on vec 8/13/14; all other vectors
- *               print and halt.  NOTE(EXC-AMD64-02): No user-vs-kernel split —
- *               user exceptions also halt the kernel.
+ *   vec < 32  : CPU exceptions.  Recursion guard (fault_enter), then switch
+ *               on vec 8/13/14; every vector routes through
+ *               fault_handle_user_or_panic (user → terminate, kernel → panic).
  *   vec == 0x80: Legacy int 0x80 syscall → kernel_syscall_dispatcher.
  *   vec 32-255: Hardware IRQs.  vec==32 (timer) → kernel_timer_tick; others →
  *               irq_dispatch.  All end with lapic_eoi(); vectors 32-47 also
  *               call pic_send_eoi() to satisfy the legacy 8259 PIC.
- *               NOTE(EXC-AMD64-03): LAPIC LINT0 is configured as ExtINT in
- *               apic.c:22, so legacy PIC IRQ 0 (vec==32) may fire simultaneously
- *               with the LAPIC periodic timer at vec==32 → double timer tick.
+ *               NOTE(EXC-AMD64-03, resolved): the PIT is halted after LAPIC
+ *               calibration, so vec 32 has a single source (LAPIC timer).
  *
  * Calling convention: called from assembly with a C ABI call; RDI = &pt_regs.
  * Returns RAX = new RSP (next task's pt_regs or the same regs on no-switch).
@@ -342,31 +329,6 @@ struct pt_regs *amd64_isr_dispatch(struct pt_regs *regs) {
       fault_printf("\n[C%d] NESTED CPU EXCEPTION vec=%lu err=0x%lx rip=%016lx — halting\n",
                    fault_cpu_id(), vec, regs->err, regs->rip);
       arch_cpu_halt();
-    }
-
-    /* Check if this is a fault during a safe probe.
-     * NOTE(EXC-AMD64-01): probe_in_progress is never set on amd64; this
-     * entire block is unreachable dead code.  The intended RIP fixup is
-     * also unimplemented — falls through to the normal handler below. */
-    if (probe_in_progress && (vec == 14 || vec == 13)) {
-      probe_failed = true;
-      /* On x86, we need to adjust RIP to skip the faulting instruction.
-       * Most move instructions involved in the probe are 3-7 bytes.
-       * This is tricky without a full disassembler, but we can assume
-       * the probe uses a specific move format or we can use a simpler approach.
-       *
-       * Actually, a better way for x86 is to use a specific assembly probe function
-       * that we know the length of.
-       */
-
-      /* For now, let's try to handle it in platform.c with a setjmp-like mechanism
-       * or just by adjusting RIP if we know it's a 3-byte move (e.g. mov [rdx], rax)
-       * In platform.c: *ptr = 0x55AA... is typically 10 bytes (movabsq + mov)
-       */
-
-      /* Let's assume the faulting instruction is a memory access.
-       * We'll use a safer approach in platform.c.
-       */
     }
 
     /* Handle exceptions (EXC-AMD64-02 resolved): user-attributable faults —
@@ -404,9 +366,8 @@ struct pt_regs *amd64_isr_dispatch(struct pt_regs *regs) {
     struct pt_regs *ret_regs = regs;
 
     if (vec == 32) {
-        /* Timer Interrupt (PIT or LAPIC periodic, vector 32).
-         * NOTE(EXC-AMD64-03): If LAPIC LINT0 (ExtINT) and the LAPIC periodic
-         * timer both fire at vec==32, kernel_timer_tick runs twice per interval.
+        /* Timer Interrupt (LAPIC periodic, vector 32; the PIT is halted
+         * after calibration — EXC-AMD64-03 resolved).
          * NOTE(CPU-AMD64-01): No FPU save; ctx_switch on this path risks XMM
          * corruption between concurrently running kernel tasks. */
         ret_regs = kernel_timer_tick(regs);
