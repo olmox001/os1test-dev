@@ -47,13 +47,16 @@
  *     directly through virtio_blk_{read,write} (EXT4-15).
  *
  * Known issues (still open):
- *   EXT4-05  (W3 MISSING) Write path rejects block_idx >= 12 and extent
- *            inodes; write ceiling is 12 × 4096 = 48 KB on legacy inodes.
+ *   EXT4-05  (W3 MISSING, partially lifted) Write supports: overwrite of any
+ *            mapped block; growth on depth-0 extent roots with a free slot;
+ *            growth through the legacy single-indirect range (~4.2 MB).
+ *            Still rejected loudly: extent-tree growth (depth>0, full root,
+ *            mid-hole insert), double-indirect allocation, file creation.
  *   EXT4-09  (W2 MISSING) ext4_list returns -2 without syscall-layer errno
  *            translation.
- *   EXT4-11  (W2 PERF) Indirect/extent interior blocks are re-read from disk
- *            on every 4 KB chunk; no caching (Phase B driver/perf work).
  *   EXT4-15  (W1 MISSING) Buffer cache bypassed; all I/O direct to virtio.
+ *            (EXT4-11 resolved: per-loop interior-block cache, see
+ *            struct ext4_icache.)
  */
 #include <drivers/virtio_blk.h>
 #include <kernel/buffer.h>
@@ -253,6 +256,61 @@ static int ext4_update_inode(struct ext4_fs *fs, uint32_t ino,
 }
 
 /*
+ * Interior-block cache (EXT4-11 resolved).
+ *
+ * A read/write loop calls ext4_bmap once per 4 KB chunk; without caching,
+ * every call re-reads the same interior metadata blocks (indirect pointer
+ * blocks, extent index/leaf nodes) from disk.  An ext4_icache lives on the
+ * caller's frame for the duration of one loop and holds the last interior
+ * block seen per tree level (two levels cover double-indirect and
+ * depth-2 extent trees; deeper levels share slot 1).  Sequential access —
+ * the dominant pattern (ELF load, WAD streaming, dir scans) — then reads
+ * each metadata block once instead of once per chunk.
+ *
+ * Writers that modify mapping metadata on disk must icache_invalidate()
+ * so later lookups in the same loop re-read the updated block.
+ */
+struct ext4_icache {
+  uint64_t blk[2]; /* cached block number per level; 0 = empty slot */
+  uint8_t *buf[2]; /* lazily allocated 4 KB buffers */
+};
+
+static void icache_release(struct ext4_icache *c) {
+  for (int i = 0; i < 2; i++) {
+    if (c->buf[i])
+      kfree(c->buf[i]);
+    c->buf[i] = NULL;
+    c->blk[i] = 0;
+  }
+}
+
+static void icache_invalidate(struct ext4_icache *c) {
+  c->blk[0] = 0;
+  c->blk[1] = 0;
+}
+
+/* Return the contents of interior block 'blk' via the level slot, reading
+ * from disk only on a cache miss.  NULL on OOM or I/O error. */
+static uint8_t *icache_get(struct ext4_fs *fs, struct ext4_icache *c,
+                           int level, uint64_t blk) {
+  if (level > 1)
+    level = 1;
+  if (c->buf[level] && c->blk[level] == blk)
+    return c->buf[level];
+  if (!c->buf[level]) {
+    c->buf[level] = kmalloc(4096);
+    if (!c->buf[level])
+      return NULL;
+  }
+  if (ext4_bread(fs->part_start_lba + blk * 8, 8, c->buf[level]) != 0) {
+    c->blk[level] = 0;
+    return NULL;
+  }
+  c->blk[level] = blk;
+  return c->buf[level];
+}
+
+/*
  * ext4_extent_lookup - map logical block → physical block via the extent
  * tree rooted in i_block[] (EXT4_EXTENTS_FL inodes).
  *
@@ -268,10 +326,9 @@ static int ext4_update_inode(struct ext4_fs *fs, uint32_t ino,
  */
 static int ext4_extent_lookup(struct ext4_fs *fs,
                               const struct ext4_inode *inode, uint32_t blk,
-                              uint64_t *phys_out) {
+                              uint64_t *phys_out, struct ext4_icache *cache) {
   const struct ext4_extent_header *eh =
       (const struct ext4_extent_header *)inode->i_block;
-  uint8_t *nodebuf = NULL;
   /* Max records per node: 4 in the 60-byte i_block root, 340 in a 4 KB
    * block ((4096-12)/12).  Used to bound eh_entries before scanning. */
   uint16_t max_entries = 4;
@@ -283,8 +340,6 @@ static int ext4_extent_lookup(struct ext4_fs *fs,
         eh->eh_entries > max_entries) {
       pr_err("Ext4: invalid extent node (magic=0x%x entries=%d max=%d)\n",
              eh->eh_magic, eh->eh_entries, eh->eh_max);
-      if (nodebuf)
-        kfree(nodebuf);
       return -1;
     }
 
@@ -299,24 +354,14 @@ static int ext4_extent_lookup(struct ext4_fs *fs,
         else
           break;
       }
-      if (sel < 0) {
-        /* blk precedes the first mapped range: hole. */
-        if (nodebuf)
-          kfree(nodebuf);
-        return 0;
-      }
+      if (sel < 0)
+        return 0; /* blk precedes the first mapped range: hole. */
       uint64_t child =
           ix[sel].ei_leaf_lo | ((uint64_t)ix[sel].ei_leaf_hi << 32);
-      if (!nodebuf) {
-        nodebuf = kmalloc(4096);
-        if (!nodebuf)
-          return -1;
-      }
-      if (ext4_bread(fs->part_start_lba + child * 8, 8, nodebuf) != 0) {
-        kfree(nodebuf);
+      const uint8_t *node = icache_get(fs, cache, level, child);
+      if (!node)
         return -1;
-      }
-      eh = (const struct ext4_extent_header *)nodebuf;
+      eh = (const struct ext4_extent_header *)node;
       max_entries = (4096 - sizeof(*eh)) / sizeof(struct ext4_extent);
       continue;
     }
@@ -336,13 +381,9 @@ static int ext4_extent_lookup(struct ext4_fs *fs,
         break; /* unwritten: leave *phys_out = 0 → reads as zeros */
       }
     }
-    if (nodebuf)
-      kfree(nodebuf);
     return 0; /* no covering extent: hole → zeros */
   }
 
-  if (nodebuf)
-    kfree(nodebuf);
   pr_err("%s", "Ext4: extent tree deeper than 5 levels (corrupt?)\n");
   return -1;
 }
@@ -352,12 +393,13 @@ static int ext4_extent_lookup(struct ext4_fs *fs,
  * Dispatches on EXT4_EXTENTS_FL (EXT4-01); the legacy path supports direct
  * (0-11), single-indirect (12) and double-indirect (13) pointers.
  * *phys_out == 0 means "hole: reads as zeros".  Returns 0 / -1.
- * NOTE(EXT4-11): interior pointer/extent blocks are re-read per call.
+ * Interior metadata blocks go through the caller's icache (EXT4-11).
  */
 static int ext4_bmap(struct ext4_fs *fs, const struct ext4_inode *inode,
-                     uint32_t block_idx, uint64_t *phys_out) {
+                     uint32_t block_idx, uint64_t *phys_out,
+                     struct ext4_icache *cache) {
   if (inode->i_flags & EXT4_EXTENTS_FL)
-    return ext4_extent_lookup(fs, inode, block_idx, phys_out);
+    return ext4_extent_lookup(fs, inode, block_idx, phys_out, cache);
 
   *phys_out = 0;
   if (block_idx < 12) {
@@ -365,40 +407,35 @@ static int ext4_bmap(struct ext4_fs *fs, const struct ext4_inode *inode,
     return 0;
   }
 
-  uint8_t *indirect_buf = kmalloc(4096);
-  if (!indirect_buf)
-    return -1;
-
-  int ret = -1;
   if (block_idx < 12 + 1024) {
     uint32_t indirect_blk_num = inode->i_block[12];
-    if (indirect_blk_num != 0 &&
-        ext4_bread(fs->part_start_lba + (indirect_blk_num * 8), 8,
-                   indirect_buf) == 0) {
-      *phys_out = ((uint32_t *)indirect_buf)[block_idx - 12];
-      ret = 0;
-    }
-  } else {
-    uint32_t d_idx = block_idx - 12 - 1024;
-    uint32_t master_idx = d_idx / 1024;
-    uint32_t sub_idx = d_idx % 1024;
-    uint32_t double_indir_blk = inode->i_block[13];
-
-    if (double_indir_blk != 0 && master_idx < 1024 &&
-        ext4_bread(fs->part_start_lba + (double_indir_blk * 8), 8,
-                   indirect_buf) == 0) {
-      uint32_t sub_indir_blk = ((uint32_t *)indirect_buf)[master_idx];
-      if (sub_indir_blk != 0 &&
-          ext4_bread(fs->part_start_lba + (sub_indir_blk * 8), 8,
-                     indirect_buf) == 0) {
-        *phys_out = ((uint32_t *)indirect_buf)[sub_idx];
-        ret = 0;
-      }
-    }
+    if (indirect_blk_num == 0)
+      return 0; /* unallocated pointer block: hole */
+    const uint8_t *ind = icache_get(fs, cache, 0, indirect_blk_num);
+    if (!ind)
+      return -1;
+    *phys_out = ((const uint32_t *)ind)[block_idx - 12];
+    return 0;
   }
 
-  kfree(indirect_buf);
-  return ret;
+  uint32_t d_idx = block_idx - 12 - 1024;
+  uint32_t master_idx = d_idx / 1024;
+  uint32_t sub_idx = d_idx % 1024;
+  uint32_t double_indir_blk = inode->i_block[13];
+
+  if (double_indir_blk == 0 || master_idx >= 1024)
+    return double_indir_blk == 0 ? 0 : -1;
+  const uint8_t *master = icache_get(fs, cache, 0, double_indir_blk);
+  if (!master)
+    return -1;
+  uint32_t sub_indir_blk = ((const uint32_t *)master)[master_idx];
+  if (sub_indir_blk == 0)
+    return 0; /* hole */
+  const uint8_t *sub = icache_get(fs, cache, 1, sub_indir_blk);
+  if (!sub)
+    return -1;
+  *phys_out = ((const uint32_t *)sub)[sub_idx];
+  return 0;
 }
 
 /*
@@ -419,6 +456,7 @@ static int ext4_read_data(struct ext4_fs *fs, const struct ext4_inode *inode,
 
   uint32_t bytes_read = 0;
   uint64_t current_offset = offset;
+  struct ext4_icache cache = {{0, 0}, {NULL, NULL}};
 
   uint8_t *block_buf = kmalloc(4096);
   if (!block_buf)
@@ -432,8 +470,9 @@ static int ext4_read_data(struct ext4_fs *fs, const struct ext4_inode *inode,
       to_copy = size - bytes_read;
 
     uint64_t phys_block;
-    if (ext4_bmap(fs, inode, block_idx, &phys_block) != 0) {
+    if (ext4_bmap(fs, inode, block_idx, &phys_block, &cache) != 0) {
       kfree(block_buf);
+      icache_release(&cache);
       return -1;
     }
 
@@ -444,6 +483,7 @@ static int ext4_read_data(struct ext4_fs *fs, const struct ext4_inode *inode,
       uint64_t sector = fs->part_start_lba + (phys_block * 8);
       if (virtio_blk_read(block_buf, sector, 8) != 0) {
         kfree(block_buf);
+        icache_release(&cache);
         return -1;
       }
     }
@@ -454,6 +494,7 @@ static int ext4_read_data(struct ext4_fs *fs, const struct ext4_inode *inode,
   }
 
   kfree(block_buf);
+  icache_release(&cache);
   return bytes_read;
 }
 
@@ -686,9 +727,71 @@ static int ext4_read(struct vfs_node *node, uint64_t offset, void *buf,
 }
 
 /*
+ * ext4_extent_can_append - can a new block mapping for 'logical' be added
+ * to the inode's extent tree?  Conservative: only depth-0 roots with a free
+ * record slot and logical positions at/after the current end are accepted
+ * (mid-hole inserts would need record shifting; a full root would need tree
+ * growth — both still EXT4-05 territory).
+ */
+static int ext4_extent_can_append(const struct ext4_inode *inode,
+                                  uint32_t logical) {
+  const struct ext4_extent_header *eh =
+      (const struct ext4_extent_header *)inode->i_block;
+  const struct ext4_extent *ex = (const struct ext4_extent *)(eh + 1);
+
+  if (eh->eh_magic != EXT4_EXT_MAGIC || eh->eh_depth != 0)
+    return 0;
+  if (eh->eh_entries > 0) {
+    const struct ext4_extent *last = &ex[eh->eh_entries - 1];
+    uint32_t len = last->ee_len > EXT4_EXT_UNWRITTEN_LEN
+                       ? last->ee_len - EXT4_EXT_UNWRITTEN_LEN
+                       : last->ee_len;
+    if (logical < last->ee_block + len)
+      return 0; /* would be a mid-hole insert */
+  }
+  return eh->eh_entries < eh->eh_max;
+}
+
+/*
+ * ext4_extent_do_append - record the mapping logical→phys in a depth-0 root
+ * previously validated by ext4_extent_can_append.  Extends the last extent
+ * when physically contiguous, else appends a new record (sorted order is
+ * preserved because logical >= last end).
+ */
+static void ext4_extent_do_append(struct ext4_inode *inode, uint32_t logical,
+                                  uint32_t phys) {
+  struct ext4_extent_header *eh =
+      (struct ext4_extent_header *)inode->i_block;
+  struct ext4_extent *ex = (struct ext4_extent *)(eh + 1);
+
+  if (eh->eh_entries > 0) {
+    struct ext4_extent *last = &ex[eh->eh_entries - 1];
+    if (last->ee_len < EXT4_EXT_UNWRITTEN_LEN - 1 &&
+        logical == last->ee_block + last->ee_len &&
+        phys == last->ee_start_lo + last->ee_len && last->ee_start_hi == 0) {
+      last->ee_len++;
+      return;
+    }
+  }
+  ex[eh->eh_entries].ee_block = logical;
+  ex[eh->eh_entries].ee_len = 1;
+  ex[eh->eh_entries].ee_start_hi = 0;
+  ex[eh->eh_entries].ee_start_lo = phys;
+  eh->eh_entries++;
+}
+
+/*
  * ext4_write - path-based write (fs_ops.write; overwrite/append).
- * Restrictions: read-only mounts and extent inodes are rejected loudly;
- * legacy inodes cap at the 12 direct blocks (EXT4-05, 48 KB).
+ *
+ * Supported (EXT4-05 partially lifted):
+ *   - overwrite of any already-mapped block (extent trees of any depth,
+ *     legacy direct/indirect/double-indirect) — no metadata change;
+ *   - growth on extent inodes with a depth-0 root and a free record slot
+ *     (extend-if-contiguous, else new extent; sparse tail writes OK);
+ *   - growth on legacy inodes through the single-indirect range
+ *     (12+1024 blocks ≈ 4.2 MB), allocating the pointer block on demand.
+ * Still rejected loudly: read-only mounts, extent-tree growth (depth>0 /
+ * full root / mid-hole insert), double-indirect allocation, file creation.
  */
 static int ext4_write(struct vfs_mount *mnt, const char *path,
                       uint64_t offset64, const void *vbuf, uint32_t size) {
@@ -710,12 +813,9 @@ static int ext4_write(struct vfs_mount *mnt, const char *path,
   if (get_inode_struct(fs, ino, &inode) != 0)
     return -1;
 
-  if (inode.i_flags & EXT4_EXTENTS_FL) {
-    pr_err("%s", "Ext4: write to extent-mapped inode not supported yet\n");
-    return -1;
-  }
+  int is_extent = (inode.i_flags & EXT4_EXTENTS_FL) != 0;
 
-  /* Legacy 32-bit write path; bound offset before narrowing. */
+  /* 32-bit write path; bound offset before narrowing. */
   if (offset64 > 0xFFFFFFFFULL ||
       offset64 > (uint64_t)inode.i_size_lo + 1048576) {
     pr_err("EXT4: Write offset 0x%lx exceeds reasonable bounds "
@@ -727,6 +827,7 @@ static int ext4_write(struct vfs_mount *mnt, const char *path,
 
   uint32_t bytes_written = 0;
   uint32_t current_offset = offset;
+  struct ext4_icache cache = {{0, 0}, {NULL, NULL}};
 
   uint8_t *block_buf = kmalloc(4096);
   if (!block_buf)
@@ -739,47 +840,90 @@ static int ext4_write(struct vfs_mount *mnt, const char *path,
     if (to_copy > (size - bytes_written))
       to_copy = size - bytes_written;
 
-    if (block_idx >= 12) {
-      pr_err("%s", "Ext4: Indirect block write not supported yet\n");
-      kfree(block_buf);
-      return -1;
-    }
+    uint64_t phys_block;
+    if (ext4_bmap(fs, &inode, block_idx, &phys_block, &cache) != 0)
+      goto fail;
 
-    uint32_t phys_block = inode.i_block[block_idx];
     if (phys_block == 0) {
-      phys_block = ext4_alloc_block(fs);
-      if (phys_block == 0) {
-        pr_err("%s", "Ext4: Block allocation failed\n");
-        kfree(block_buf);
-        return -1;
+      /* Unmapped block: validate the mapping is recordable BEFORE
+       * allocating, so a reject never leaks a bitmap bit. */
+      if (is_extent && !ext4_extent_can_append(&inode, block_idx)) {
+        pr_err("%s", "Ext4: extent-tree growth (depth>0, full root or "
+                     "mid-hole insert) not supported yet\n");
+        goto fail;
       }
-      inode.i_block[block_idx] = phys_block;
+      if (!is_extent && block_idx >= 12 + 1024) {
+        pr_err("%s", "Ext4: double-indirect block write not supported yet\n");
+        goto fail;
+      }
+
+      uint32_t nb = ext4_alloc_block(fs);
+      if (nb == 0) {
+        pr_err("%s", "Ext4: Block allocation failed\n");
+        goto fail;
+      }
+
+      if (is_extent) {
+        ext4_extent_do_append(&inode, block_idx, nb);
+      } else if (block_idx < 12) {
+        inode.i_block[block_idx] = nb;
+      } else {
+        /* Single-indirect: allocate the pointer block on demand (it comes
+         * back zeroed from ext4_alloc_block = all slots NULL), then install
+         * the new pointer with a sector-granular read-modify-write. */
+        uint32_t ind = inode.i_block[12];
+        if (ind == 0) {
+          ind = ext4_alloc_block(fs);
+          if (ind == 0) {
+            pr_err("%s", "Ext4: Block allocation failed\n");
+            goto fail;
+          }
+          inode.i_block[12] = ind;
+          inode.i_blocks_lo += (4096 / 512);
+        }
+        uint64_t slot_off = (uint64_t)ind * 4096 + (block_idx - 12) * 4;
+        uint64_t slot_sector = fs->part_start_lba + slot_off / 512;
+        uint8_t *secbuf = kmalloc(512);
+        if (!secbuf)
+          goto fail;
+        if (ext4_bread(slot_sector, 1, secbuf) != 0) {
+          kfree(secbuf);
+          goto fail;
+        }
+        *(uint32_t *)(secbuf + (slot_off % 512)) = nb;
+        if (ext4_bwrite(slot_sector, 1, secbuf) != 0) {
+          kfree(secbuf);
+          goto fail;
+        }
+        kfree(secbuf);
+        /* The pointer block changed on disk: drop cached copies. */
+        icache_invalidate(&cache);
+      }
+
       /* i_blocks_lo counts 512-byte sectors. */
       inode.i_blocks_lo += (4096 / 512);
+      phys_block = nb;
     }
 
     /* Read-modify-write for partial blocks. */
     if (block_off != 0 || to_copy != 4096) {
       if (ext4_bread(fs->part_start_lba + (phys_block * 8), 8, block_buf) !=
-          0) {
-        kfree(block_buf);
-        return -1;
-      }
+          0)
+        goto fail;
     }
 
     memcpy(block_buf + block_off, buf + bytes_written, to_copy);
 
     if (ext4_bwrite(fs->part_start_lba + (phys_block * 8), 8, block_buf) !=
-        0) {
-      kfree(block_buf);
-      return -1;
-    }
+        0)
+      goto fail;
 
     bytes_written += to_copy;
     current_offset += to_copy;
   }
 
   kfree(block_buf);
+  icache_release(&cache);
 
   if (current_offset > inode.i_size_lo)
     inode.i_size_lo = current_offset;
@@ -790,6 +934,11 @@ static int ext4_write(struct vfs_mount *mnt, const char *path,
   }
 
   return bytes_written;
+
+fail:
+  kfree(block_buf);
+  icache_release(&cache);
+  return -1;
 }
 
 /*
