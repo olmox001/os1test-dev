@@ -34,9 +34,11 @@
  *             compositor, inverting the correct dependency.
  *   SCHED-02  (W2 BAD-IMPL) schedule() is large and intricate; many pc==0
  *             panic guards betray past context-corruption bugs.
- *   SCHED-03  (W2 WRONG-DESIGN) process_wait() is non-blocking (returns -1
- *             while target is alive); zombies are only reaped via process_wait,
- *             so unwaited children permanently leak process pool slots.
+ *   SCHED-03  (W2 WRONG-DESIGN, MITIGATED) process_wait() is non-blocking
+ *             (returns -1 while target is alive).  Zombies are now auto-reaped
+ *             by schedule() (prev==ZOMBIE -> reap stack), so unwaited children
+ *             no longer leak pool slots; exit-status collection for a future
+ *             blocking wait() still needs parent/child links (SCHED-06).
  *   SCHED-04  (W2 BUG/DOC) Comment in process_create says "Kernel Stack (16KB)"
  *             but STACK_SIZE is 128KB.
  *   SCHED-05  (W3 BUG/SECURITY) kernel_ipc_send() nests sched_lock -> msg_lock
@@ -553,7 +555,8 @@ void smp_create_idle_task(uint32_t cpu_id) {
  *
  * If the process is terminating itself (current_process == proc), it is
  * marked PROC_ZOMBIE; the caller (sys_exit) must immediately call schedule()
- * to switch away.  Zombie resources are freed by process_wait().
+ * to switch away.  schedule() auto-reaps the zombie via the deferred-free
+ * stack on its next pass (process_wait() can still reap it first).
  *
  * If the process is not running on any CPU (on_cpu < 0), resources are freed
  * immediately: kernel stack (pmm_free_pages), page table (vmm_destroy_pgd),
@@ -570,8 +573,8 @@ void smp_create_idle_task(uint32_t cpu_id) {
  * IRQ context: no.
  * Returns: 0 on success, -1 if not found or protected.
  *
- * NOTE(SCHED-03): Zombies are only reaped via process_wait(); without an
- *          explicit waiter the pool slot is leaked permanently. [W2]
+ * NOTE(SCHED-03, mitigated): zombies are auto-reaped by schedule(); the
+ *          historical pool-slot leak no longer occurs without a waiter.
  * NOTE(ABI-04): The PROC_PERM_SYSTEM check is the only access-control gate;
  *          any user process may kill any non-system PID. [W4 SECURITY]
  */
@@ -611,8 +614,8 @@ int process_terminate(int pid) {
 
   /* Self-termination: we are standing on this process's kernel stack, so we
    * cannot free it now.  Mark ZOMBIE; the caller (sys_exit) MUST call
-   * schedule() to switch away, and process_wait() reaps the zombie.
-   * NOTE(SCHED-03): an unwaited zombie keeps its pool slot until reaped. */
+   * schedule() to switch away — schedule() then auto-reaps the zombie via
+   * the per-CPU deferred-free stack (SCHED-03 mitigation). */
   if (current_process == proc) {
     proc->state = PROC_ZOMBIE;
     spin_unlock_irqrestore(&sched_lock, flags);
@@ -657,8 +660,26 @@ int process_terminate(int pid) {
     proc->wait_queue_ptr = NULL;
     spin_unlock(&wq->lock);
     proc->state = PROC_DEAD;
-    spin_unlock_irqrestore(&sched_lock, flags);
-    return 0;
+    /* A sleeper that has set PROC_SLEEPING but not yet switched away is
+     * still executing on its kernel stack — it is still current_task on its
+     * CPU, and its own schedule() will reap it via the prev==DEAD path.
+     * Only a fully parked sleeper (its CPU has moved on) may be freed here;
+     * previously this branch just returned, leaking parked corpses forever
+     * (no reap path ever saw them).  Check under the owning CPU's sched_lock
+     * to order against that CPU's schedule(). */
+    {
+      int vcpu = (proc->on_cpu >= 0) ? proc->on_cpu : 0;
+      struct cpu_info *vc = &cpu_data[vcpu];
+      spin_lock(&vc->sched_lock);
+      int still_current = (vc->current_task == proc);
+      spin_unlock(&vc->sched_lock);
+      if (still_current) {
+        spin_unlock_irqrestore(&sched_lock, flags);
+        return 0;
+      }
+    }
+    /* Fully parked: fall through to the immediate-free path below (the
+     * READY/RUNNING branch cannot match — state is PROC_DEAD). */
   }
 
   if (proc->state == PROC_READY || proc->state == PROC_RUNNING) {
@@ -809,6 +830,19 @@ struct pt_regs *schedule(struct pt_regs *regs) {
     }
     spin_unlock_irqrestore(&sched_lock, gflags);
 
+    /* Drain leftover IPC messages.  The external-terminate path drains the
+     * queue in process_terminate(), but a self-terminated zombie keeps any
+     * already-queued nodes.  No lock needed: kernel_ipc_send() refuses
+     * DEAD/ZOMBIE targets, so the queue is stable by the time we get here. */
+    {
+      struct list_head *pos, *q;
+      list_for_each_safe(pos, q, &to_free->msg_queue) {
+        struct ipc_node *node = list_entry(pos, struct ipc_node, list);
+        list_del(pos);
+        kfree(node);
+      }
+    }
+
     if (to_free->kernel_stack)
       pmm_free_pages((void *)(to_free->kernel_stack - STACK_SIZE), STACK_SIZE / 4096);
     if (to_free->page_table)
@@ -835,11 +869,17 @@ struct pt_regs *schedule(struct pt_regs *regs) {
 
     /* 1. Handle Current Process */
     if (prev) {
-      /* Check if externally terminated while running on this CPU */
-      if (prev->state == PROC_DEAD) {
-        /* Cannot free kernel_stack here (we're standing on it).
-         * Queue it on the reap stack; the NEXT schedule() frees it after we
-         * have switched away. */
+      /* PROC_DEAD: externally terminated while running on this CPU.
+       * PROC_ZOMBIE: terminated itself (sys_exit or fault-path kill) and
+       * entered schedule() to switch away.  Both are corpses standing on
+       * their own kernel stack, so neither can be freed here: queue on the
+       * reap stack; the NEXT schedule() on this CPU frees them after the
+       * switch.  Auto-reaping zombies here (instead of waiting for a
+       * process_wait() that the shell never issues) closes the SCHED-03
+       * pool-slot/PGD leak: doom/demo3d no longer linger as ZOMBIE.
+       * Idle tasks never reach this point (they never exit and are
+       * PROC_PERM_SYSTEM-protected from process_terminate). */
+      if (prev->state == PROC_DEAD || prev->state == PROC_ZOMBIE) {
         prev->on_cpu = -1;
         reap_push(cpu_ptr, prev);
         cpu_ptr->current_task = NULL;
@@ -1052,7 +1092,9 @@ found:
 
 /*
  * Wait for a process (non-blocking)
- * Returns PID if terminated, -1 if still running, -2 if not found
+ * Returns PID if terminated (corpse still pending reap), -1 if still
+ * running, -2 if not found (never existed, or already auto-reaped by the
+ * scheduler).  Pure reporter: freeing belongs to the schedule() reaper.
  */
 int process_wait(int pid) {
   uint64_t flags;
@@ -1061,22 +1103,11 @@ int process_wait(int pid) {
     struct process *proc = process_pool[i];
     if (proc && (int)proc->pid == pid) {
       if (proc->state == PROC_DEAD || proc->state == PROC_ZOMBIE) {
-        if (proc->state == PROC_ZOMBIE) {
-          /* Now we can safely free the zombie's resources */
-          pr_info("Reaping zombie process %d\n", pid);
-          if (proc->kernel_stack) {
-            pmm_free_pages((void *)(proc->kernel_stack - STACK_SIZE),
-                           STACK_SIZE / 4096);
-          }
-          if (proc->page_table) {
-            vmm_destroy_pgd(proc->page_table);
-          }
-          pmm_free_page(proc);
-        }
-
-        /* Resource cleanup should have happened */
-        process_pool[i] = NULL;
-        active_count--;
+        /* Corpse freeing is owned EXCLUSIVELY by the scheduler reaper
+         * (per-CPU deferred-free stack): a zombie seen here is typically
+         * already queued for reaping on its CPU, so freeing it now —
+         * as this function historically did — would be a double free.
+         * Just report the termination; the slot disappears once drained. */
         spin_unlock_irqrestore(&sched_lock, flags);
         return pid;
       }
