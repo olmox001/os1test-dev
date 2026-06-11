@@ -31,7 +31,9 @@
  *
  * Known issues:
  *   MM-PMM-01  (W3 STUB)         pmm_init_region() is a no-op stub.
- *   MM-PMM-02  (W3 BUG/SECURITY) pmm_alloc_pages/aligned skip cache-clean+barrier.
+ *   MM-PMM-02  RESOLVED (Phase B2): pmm_alloc_pages (and therefore
+ *                                pmm_alloc_aligned) now clean+fence like the
+ *                                single-page path; safe for DMA buffers.
  *   MM-PMM-03  (W2 PERF)         Contiguous alloc is an O(n) scan from PFN 0.
  *   MM-PMM-04  (W2 WRONG-DESIGN) pmm_alloc_pages/aligned search ZONE_NORMAL only.
  *   MM-PMM-05  (W2 BAD-IMPL)     global free_pages (atomic) vs per-zone free_pages
@@ -497,10 +499,10 @@ void *pmm_alloc_page(void) {
  * physically contiguous memory below 16 MB cannot satisfy that requirement
  * through this path.
  *
- * NOTE(MM-PMM-02): For count>1, the returned memory is zeroed (memset) but
- * arch_cache_clean_range() and arch_mb() are NOT called.  Cache lines may be
- * stale from a previous owner, which can cause DMA read errors when a device
- * DMA-reads into these pages before the CPU writes the full block.
+ * Like the single-page path, the returned memory is zeroed, cache-cleaned
+ * (arch_cache_clean_range) and barrier-fenced (arch_mb) so a device can DMA
+ * to/from it immediately (MM-PMM-02 resolved; pmm_alloc_aligned inherits the
+ * guarantee since it carves from this function).
  *
  * NOTE(MM-PMM-03): The contiguous scan is O(n) from PFN 0 on every call;
  * there is no buddy structure or run-length metadata to accelerate it.
@@ -544,6 +546,8 @@ void *pmm_alloc_pages(size_t count) {
 
   void *addr = (void *)(MEMORY_BASE + pfn_to_phys(abs_pfn));
   memset(addr, 0, PAGE_SIZE * count);
+  arch_cache_clean_range(addr, PAGE_SIZE * count);
+  arch_mb();
 
   __sync_fetch_and_sub(&free_pages, count);
 
@@ -660,9 +664,9 @@ void pmm_free_pages(void *page, size_t count) {
  * NOTE(MM-PMM-04): Like pmm_alloc_pages(), this function searches ZONE_NORMAL
  * only.  Aligned contiguous allocations in the DMA zone are not possible.
  *
- * NOTE(MM-PMM-02): The cache-clean+barrier omission from pmm_alloc_pages()
- * propagates here; callers using this for DMA buffers must clean the cache
- * themselves before initiating device DMA.
+ * Cache coherency: inherited from pmm_alloc_pages(), which cleans and fences
+ * the whole run before returning (MM-PMM-02 resolved) — the aligned sub-range
+ * is therefore DMA-safe as returned.
  *
  * Returns: aligned pointer, or NULL on failure.
  * Locking: delegates to pmm_alloc_pages() and pmm_free_pages(); no additional
