@@ -783,9 +783,12 @@ void start_user_process(struct process *proc) {
  *          1-5; temporarily acquires other_cpu->sched_lock (trylock) during
  *          work stealing; acquires sched_lock (irqsave) during deferred free.
  *          Releases all locks before returning.
- * IRQ context: yes when called from the timer IRQ; no when called from a
- *          syscall.  The function is safe in both contexts because it uses
- *          irqsave variants.
+ * IRQ contract (SCHED-IRQ-01): schedule() masks IRQs itself at entry and is
+ *          therefore safe to call with IRQs in ANY state (timer IRQ path:
+ *          already masked; syscall paths: historically enabled).  No-switch
+ *          exits restore the caller's IRQ state; the context-switch exit
+ *          returns with IRQs masked and the dispatcher's IRET/ERET loads the
+ *          next context's saved flags.
  *
  * NOTE(SCHED-01): compositor_get_focus_pid() is called on every schedule()
  *          invocation — the kernel scheduler has a compile-time dependency on
@@ -794,9 +797,21 @@ void start_user_process(struct process *proc) {
  *          bugs; the function is large and hard to audit. [W2 BAD-IMPL]
  */
 struct pt_regs *schedule(struct pt_regs *regs) {
+  /* SCHED-IRQ-01: schedule() owns its IRQ state.  Syscall paths used to
+   * enter with IRQs enabled; a timer IRQ nesting anywhere in this function
+   * could re-enter schedule() on the same CPU — double-draining the
+   * deferred-free list (SCHED-UAF-02 family), corrupting the runqueue walk,
+   * or leaving cpu_ptr stale if the preemption migrated the task.  Mask for
+   * the WHOLE function (before even get_cpu_info(), so cpu_ptr cannot go
+   * stale): the non-switch exits restore the caller's IRQ state; the
+   * context-switch exit deliberately returns with IRQs masked — the
+   * dispatcher's IRET/ERET then loads the next context's saved flags. */
+  uint64_t sched_irq_flags = local_irq_save();
+
   struct cpu_info *cpu_ptr = get_cpu_info();
   if (!cpu_ptr) {
     if (regs && pt_regs_pc(regs) == 0) panic("SCHED: [EARLY] pc==0 on return");
+    local_irq_restore(sched_irq_flags);
     return regs;
   }
 
@@ -805,14 +820,9 @@ struct pt_regs *schedule(struct pt_regs *regs) {
    * time we reach here on this CPU, we have already context-switched to a
    * different task and are no longer touching the old stack.
    *
-   * IRQs MUST be masked for the whole drain (SCHED-UAF-02): schedule() can be
-   * entered with IRQs enabled (the syscall paths re-enable them before
-   * yielding, e.g. sys_getchar in syscall_dispatch.c), and this list is popped
-   * without a lock.  A timer IRQ nesting here would re-enter schedule() on the
-   * same CPU, drain the same node, and double-free the kernel stack, PGD and
-   * struct process.  The list is strictly per-CPU (reap_push only ever runs on
-   * the owning CPU), so masking local IRQs is sufficient — no spinlock needed. */
-  uint64_t drain_flags = local_irq_save();
+   * The list is popped without a lock: it is strictly per-CPU (reap_push
+   * only ever runs on the owning CPU) and the function-wide IRQ mask above
+   * (SCHED-IRQ-01) prevents a nested schedule() from double-draining it. */
   while (cpu_ptr->deferred_free_proc) {
     struct process *to_free = cpu_ptr->deferred_free_proc;
     cpu_ptr->deferred_free_proc = to_free->next;
@@ -849,7 +859,6 @@ struct pt_regs *schedule(struct pt_regs *regs) {
       vmm_destroy_pgd(to_free->page_table);
     pmm_free_page(to_free);
   }
-  local_irq_restore(drain_flags);
 
   uint32_t cpu = cpu_ptr->cpu_id;
   struct process *prev = cpu_ptr->current_task;
@@ -1025,6 +1034,7 @@ found:
               prev->pid);
       }
       spin_unlock_irqrestore(&cpu_ptr->sched_lock, flags);
+      local_irq_restore(sched_irq_flags); /* SCHED-IRQ-01: no-switch exit */
       return regs;
     }
 
@@ -1044,6 +1054,7 @@ found:
               prev ? (int)prev->pid : -1);
       }
       spin_unlock_irqrestore(&cpu_ptr->sched_lock, flags);
+      local_irq_restore(sched_irq_flags); /* SCHED-IRQ-01: no-switch exit */
       return regs;
     }
   }
@@ -1057,6 +1068,7 @@ found:
     next->state = PROC_RUNNING;
     next->on_cpu = cpu;
     spin_unlock_irqrestore(&cpu_ptr->sched_lock, flags);
+    local_irq_restore(sched_irq_flags); /* SCHED-IRQ-01: no-switch exit */
     return regs;
   }
 
@@ -1087,6 +1099,11 @@ found:
   arch_cpu_switch_context(next);
 
   spin_unlock_irqrestore(&cpu_ptr->sched_lock, flags);
+  /* SCHED-IRQ-01: context-switch exit — deliberately NO local_irq_restore.
+   * We are about to unwind into the dispatcher with another task's frame;
+   * IRQs stay masked until IRET/ERET loads the flags saved in that frame.
+   * (The flags captured at entry belong to the PREVIOUS task's kernel
+   * context and are restored when that context is eventually resumed.) */
   return next->context;
 }
 
