@@ -14,8 +14,10 @@
  * Invariants:
  *   - The IDT is a single shared array; all CPUs load the same base address.
  *     Only CPU 0 fills the table (guarded by idt_initialized).  APs spin-wait.
- *   - Every hardware IRQ (vec 32-255) ends with lapic_eoi(); legacy PIC range
- *     (32-47) additionally calls pic_send_eoi() to deassert the 8259 output.
+ *   - Every hardware IRQ (vec 32-255) ends through irq_chip_end(): the chip
+ *     (pic_chip_end) owns the full LAPIC + 8259 EOI sequence.  Spurious
+ *     IRQ7/IRQ15 (vec 39/47) and the LAPIC spurious vector (0xFF) are
+ *     filtered before dispatch and follow their own EOI rules.
  *
  * Known issues:
  *   EXC-AMD64-01 RESOLVED (Phase A step 14): the dead probe-recovery block
@@ -43,6 +45,7 @@
 #include <kernel/printk.h>
 #include <kernel/cpu.h>
 #include <kernel/fault.h>
+#include <kernel/irq.h>
 #include <arch/pt_regs.h>
 #include <arch/arch.h>
 #include <arch/amd64_internal.h>
@@ -304,9 +307,9 @@ extern struct pt_regs *kernel_timer_tick(struct pt_regs *regs);
  *               on vec 8/13/14; every vector routes through
  *               fault_handle_user_or_panic (user → terminate, kernel → panic).
  *   vec == 0x80: Legacy int 0x80 syscall → kernel_syscall_dispatcher.
- *   vec 32-255: Hardware IRQs.  vec==32 (timer) → kernel_timer_tick; others →
- *               irq_dispatch.  All end with lapic_eoi(); vectors 32-47 also
- *               call pic_send_eoi() to satisfy the legacy 8259 PIC.
+ *   vec 32-255: Hardware IRQs.  Spurious 39/47/0xFF filtered first; vec==32
+ *               (timer) → kernel_timer_tick; others → irq_dispatch.  All end
+ *               through irq_chip_end() (chip-owned LAPIC + PIC EOI).
  *               NOTE(EXC-AMD64-03, resolved): the PIT is halted after LAPIC
  *               calibration, so vec 32 has a single source (LAPIC timer).
  *
@@ -365,6 +368,18 @@ struct pt_regs *amd64_isr_dispatch(struct pt_regs *regs) {
     /* Hardware interrupts (32-255) */
     struct pt_regs *ret_regs = regs;
 
+    /* 8259 spurious IRQ7/IRQ15 (vectors 39/47): not real interrupts — a
+     * level pulse deasserted before INTA.  Filtered BEFORE dispatch because
+     * their EOI rules differ (none / master-only); pic_handle_spurious()
+     * performs what is needed.  Likewise the LAPIC spurious vector (0xFF,
+     * set in SVR) requires no EOI and no dispatch. */
+    if ((vec == 39 || vec == 47) && pic_handle_spurious((uint32_t)vec)) {
+        return ret_regs;
+    }
+    if (vec == 0xFF) {
+        return ret_regs;
+    }
+
     if (vec == 32) {
         /* Timer Interrupt (LAPIC periodic, vector 32; the PIT is halted
          * after calibration — EXC-AMD64-03 resolved).
@@ -373,23 +388,14 @@ struct pt_regs *amd64_isr_dispatch(struct pt_regs *regs) {
         ret_regs = kernel_timer_tick(regs);
     } else {
         /* All other Hardware interrupts - route via generic system */
-        if (vec != 32) {
-            pr_debug("AMD64: Hardware Interrupt Vector %lu triggered!\n", vec);
-        }
+        pr_debug("AMD64: Hardware Interrupt Vector %lu triggered!\n", vec);
         extern struct pt_regs *irq_dispatch(uint32_t irq, struct pt_regs * regs);
         ret_regs = irq_dispatch(vec, regs);
     }
 
-    /* Acknowledge LAPIC for all HW interrupts.
-     * Writing 0 to the EOI register signals end-of-interrupt. */
-    lapic_eoi();
-
-    /* Also acknowledge legacy PIC for its range (32-47) if active.
-     * Vectors 32-47 correspond to 8259 IRQs 0-15; the PIC requires its own
-     * EOI sequence in addition to the LAPIC EOI. */
-    if (vec >= 32 && vec < 48) {
-        pic_send_eoi(vec - 32);
-    }
+    /* End-of-interrupt through the chip (IRQ-01 fix): pic_chip_end() owns
+     * the complete LAPIC + 8259 sequence; nothing here EOIs by hand. */
+    irq_chip_end((uint32_t)vec);
 
     return ret_regs;
   }
