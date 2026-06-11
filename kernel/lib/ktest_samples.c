@@ -30,6 +30,7 @@
  */
 #include <kernel/test.h>
 #include <kernel/string.h>
+#include <kernel/kmalloc.h>
 
 /* test_string_length - verify strlen() for a literal and an empty string.
  * Failure: KASSERT_EQ prints the mismatch and returns (see LIB-KTEST-01). */
@@ -52,4 +53,32 @@ KTEST_CASE(test_math_basic) {
     int a = 10;
     int b = 20;
     KASSERT_EQ(a + b, 30);
+}
+
+/* test_kmalloc_growth - prove the small-object pool grows past one chunk
+ * (MM-KM-01).  1100 blocks in the 4096-byte bucket exceed a 4 MB chunk
+ * regardless of how full the active chunk already is, so at least one
+ * growth must succeed for every allocation to come back non-NULL.  Each
+ * block is touched (write+readback) and everything is freed to the bucket
+ * lists afterwards, where it stays reusable. */
+#define KMG_BLOCKS 1100
+static void *kmg_ptrs[KMG_BLOCKS];
+KTEST_CASE(test_kmalloc_growth) {
+    int i;
+    for (i = 0; i < KMG_BLOCKS; i++) {
+        kmg_ptrs[i] = kmalloc(4000);
+        if (!kmg_ptrs[i]) break;
+        ((uint8_t *)kmg_ptrs[i])[0] = (uint8_t)i;
+        ((uint8_t *)kmg_ptrs[i])[3999] = (uint8_t)(i ^ 0xFF);
+    }
+    int allocated = i;
+    int corrupt = 0;
+    for (i = 0; i < allocated; i++) {
+        if (((uint8_t *)kmg_ptrs[i])[0] != (uint8_t)i ||
+            ((uint8_t *)kmg_ptrs[i])[3999] != (uint8_t)(i ^ 0xFF))
+            corrupt++;
+        kfree(kmg_ptrs[i]);
+    }
+    KASSERT_EQ(allocated, KMG_BLOCKS);
+    KASSERT_EQ(corrupt, 0);
 }
