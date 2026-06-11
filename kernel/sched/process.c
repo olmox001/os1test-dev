@@ -558,9 +558,13 @@ void smp_create_idle_task(uint32_t cpu_id) {
  * to switch away.  schedule() auto-reaps the zombie via the deferred-free
  * stack on its next pass (process_wait() can still reap it first).
  *
- * If the process is not running on any CPU (on_cpu < 0), resources are freed
- * immediately: kernel stack (pmm_free_pages), page table (vmm_destroy_pgd),
- * and the struct process page (pmm_free_page).
+ * If the process is neither READY/RUNNING nor self-terminating (SLEEPING on
+ * a wait queue or in IPC, or CREATED-never-scheduled), it is detached from
+ * any wait queue and marked DEAD; if it is provably parked (not current_task
+ * on its CPU, checked under that CPU's sched_lock) its resources are freed
+ * immediately, otherwise the owning CPU's schedule() reaps it (prev==DEAD).
+ * Supervisors polling process_wait() must treat -2 as "child gone": an
+ * immediately-freed victim never appears as a waitable corpse.
  *
  * System processes (PROC_PERM_SYSTEM) cannot be terminated.
  *
@@ -654,32 +658,14 @@ int process_terminate(int pid) {
    *     it is not current_task anywhere and not on any runqueue.
    */
   if (proc->wait_queue_ptr) {
+    /* Detach from the wait queue first so a concurrent wake_up() can never
+     * resurrect the victim; the parked-vs-running decision is made by the
+     * common tail below, exactly as for IPC sleepers. */
     struct wait_queue_head *wq = proc->wait_queue_ptr;
     spin_lock(&wq->lock);
     list_del_init(&proc->run_list);
     proc->wait_queue_ptr = NULL;
     spin_unlock(&wq->lock);
-    proc->state = PROC_DEAD;
-    /* A sleeper that has set PROC_SLEEPING but not yet switched away is
-     * still executing on its kernel stack — it is still current_task on its
-     * CPU, and its own schedule() will reap it via the prev==DEAD path.
-     * Only a fully parked sleeper (its CPU has moved on) may be freed here;
-     * previously this branch just returned, leaking parked corpses forever
-     * (no reap path ever saw them).  Check under the owning CPU's sched_lock
-     * to order against that CPU's schedule(). */
-    {
-      int vcpu = (proc->on_cpu >= 0) ? proc->on_cpu : 0;
-      struct cpu_info *vc = &cpu_data[vcpu];
-      spin_lock(&vc->sched_lock);
-      int still_current = (vc->current_task == proc);
-      spin_unlock(&vc->sched_lock);
-      if (still_current) {
-        spin_unlock_irqrestore(&sched_lock, flags);
-        return 0;
-      }
-    }
-    /* Fully parked: fall through to the immediate-free path below (the
-     * READY/RUNNING branch cannot match — state is PROC_DEAD). */
   }
 
   if (proc->state == PROC_READY || proc->state == PROC_RUNNING) {
@@ -704,8 +690,33 @@ int process_terminate(int pid) {
     return 0;
   }
 
-  /* Not runnable and not running anywhere — safe to free immediately. */
+  /* Common tail: not on a runqueue and not READY/RUNNING — the victim is
+   * SLEEPING (wait-queue sleeper detached above, or an IPC sleeper from
+   * sys_ipc_recv) or CREATED-never-scheduled.
+   *
+   * Mark DEAD first, then decide WHO frees.  A sleeper that has set
+   * PROC_SLEEPING but not yet switched away is still current_task on its
+   * CPU — sys_ipc_recv returns to user mode and only parks at the next
+   * tick — so freeing it here would pull the kernel stack and PGD out from
+   * under a CPU that is still executing on them (SCHED-UAF family).  That
+   * case is left to the owning CPU's schedule(), which reaps it via the
+   * prev==DEAD path.  Only a fully parked corpse (its CPU has provably
+   * moved on, checked under that CPU's sched_lock) is freed immediately;
+   * immediate freeing also means the pool slot disappears right away, so
+   * supervisors must treat process_wait()==-2 as "child gone". */
   proc->state = PROC_DEAD;
+  {
+    int vcpu = (proc->on_cpu >= 0) ? proc->on_cpu : 0;
+    struct cpu_info *vc = &cpu_data[vcpu];
+    spin_lock(&vc->sched_lock);
+    int still_current = (vc->current_task == proc);
+    spin_unlock(&vc->sched_lock);
+    if (still_current) {
+      spin_unlock_irqrestore(&sched_lock, flags);
+      return 0;
+    }
+  }
+
   if (slot >= 0) {
     process_pool[slot] = NULL;
     active_count--;
