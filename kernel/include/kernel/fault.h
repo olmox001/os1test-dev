@@ -90,4 +90,15 @@ struct pt_regs *fault_handle_user_or_panic(struct pt_regs *regs, int user_mode,
  */
 void arch_uaccess_fault_fixup(void);
 
+/*
+ * Symbolized frame-pointer backtrace (kernel/lib/backtrace.c, steps 11-12).
+ * backtrace_regs seeds from an exception frame (pc = RIP/ELR, fp = RBP/X29);
+ * backtrace_here walks from the current call site (used by panic()).
+ * ksym_lookup resolves a text address against the .ksyms blob; returns NULL
+ * (and prints raw) when no table is linked.  All output via fault_printf.
+ */
+void backtrace_regs(uint64_t pc, uint64_t fp);
+void backtrace_here(void);
+const char *ksym_lookup(uint64_t addr, uint64_t *off);
+
 #endif /* _KERNEL_FAULT_H */

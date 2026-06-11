@@ -248,6 +248,7 @@ static struct pt_regs *amd64_page_fault_handler(struct pt_regs *regs) {
                (error_code & 16) ? 1 : 0);
 
   amd64_dump_regs(regs);
+  backtrace_regs(regs->rip, regs->rbp);
   panic("Unrecoverable kernel #PF at RIP 0x%lx (CR2 0x%lx)", regs->rip, cr2);
 }
 
@@ -267,6 +268,7 @@ static struct pt_regs *amd64_gpf_handler(struct pt_regs *regs) {
 
   fault_printf("\n[C%d] KERNEL GENERAL PROTECTION FAULT\n", fault_cpu_id());
   amd64_dump_regs(regs);
+  backtrace_regs(regs->rip, regs->rbp);
   panic("Unrecoverable kernel #GP at RIP 0x%lx (err 0x%lx)", regs->rip, regs->err);
 }
 
@@ -281,6 +283,7 @@ static struct pt_regs *amd64_gpf_handler(struct pt_regs *regs) {
 static void amd64_double_fault_handler(struct pt_regs *regs) {
   fault_printf("\n[C%d] DOUBLE FAULT\n", fault_cpu_id());
   amd64_dump_regs(regs);
+  backtrace_regs(regs->rip, regs->rbp);
   arch_cpu_halt();
 }
 
@@ -388,6 +391,7 @@ struct pt_regs *amd64_isr_dispatch(struct pt_regs *regs) {
         fault_printf("\n[C%d] Unhandled kernel CPU Exception: %ld\n",
                      fault_cpu_id(), vec);
         amd64_dump_regs(regs);
+        backtrace_regs(regs->rip, regs->rbp);
         panic("Unrecoverable kernel exception (vec %lu) at RIP 0x%lx", vec, regs->rip);
       }
     }

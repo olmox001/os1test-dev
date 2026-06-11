@@ -229,7 +229,9 @@ void panic(const char *fmt, ...) {
     va_start(args, fmt);
     fault_vprintf(fmt, args);
     va_end(args);
-    fault_printf("\n\nSystem halted.\n");
+    fault_printf("\n");
+    backtrace_here();
+    fault_printf("\nSystem halted.\n");
     irq_send_ipi_all();
 
     uint64_t fflags;
@@ -248,7 +250,9 @@ void panic(const char *fmt, ...) {
   vprintk(fmt, args);
   va_end(args);
 
-  printk("\n\nSystem halted.\n");
+  printk("\n");
+  backtrace_here();
+  printk("\nSystem halted.\n");
 
   /* Disable all exceptions and halt this CPU */
   uint64_t flags;

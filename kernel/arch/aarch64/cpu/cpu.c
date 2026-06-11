@@ -359,6 +359,7 @@ struct pt_regs *sync_handler(struct pt_regs *frame) {
     }
     fault_printf("SP_EL0:  0x%016lx\n", frame->sp_el0);
     fault_printf("%s", "-----------------------------\n");
+    backtrace_regs(frame->elr, frame->regs[29]);
     panic("Unrecoverable kernel exception");
   }
 
