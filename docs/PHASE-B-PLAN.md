@@ -111,6 +111,14 @@ Severity-ordered per the review (`docs/review/REVIEW.md` §2/§4, taxonomy in
 `docs/review/TAXONOMY.md`, ~72 findings as GitHub issues, label
 `code-review`, tracking issue #19, epics #92–#96).
 
+> **Implementation method**: every microphase follows the **ASTRA** layering
+> guidelines (`docs/ASTRA.md`, adapted from the maintainer's references,
+> 2026-06): the kernel core consumes contracts only; hardware support is
+> always a *provider* behind a contract in `kernel/include/kernel/`; arch
+> dirs may only grow ISA-layer code. See ASTRA §3 for the per-microphase
+> application and §5 for the per-commit rules; ASTRA §4 sketches a possible
+> Phase C (userspace ELF driver services).
+
 ### B1 — Filesystem W5 criticals (FIRST; awaiting confirmation)
 **Scope**: VFS-01 (#64) + EXT4-01 (#56) — the two open W5 findings.
 - Today: `kernel/fs/vfs.c` is 149 lines of path-string normalisation only;
@@ -194,3 +202,15 @@ reset (`db503a3`).
   `user/sys/bin/*.c` explicitly when changing process/IPC semantics.
 - `make run ARCH=...` opens an interactive window (uses the canonical
   QEMU_FLAGS in the Makefile §"QEMU Flags") — good for GUI checks.
+
+---
+
+## 6. Architectural north star
+
+`docs/ASTRA.md` — the service-tree/provider model the maintainer set as the
+implementation method for Phase B and for a candidate Phase C (functional
+drivers as supervised ELF services on `map_mmio`/`wait_irq`/`dma_alloc`/IPC
+primitives; `blk.elf` migrates last because the rootfs depends on it).  Key
+acceptance hook already wired into B1: **no `ext4_*` call outside
+`kernel/fs/`** — ASTRA's "providers behind contracts" rule applied to the
+first seam.
