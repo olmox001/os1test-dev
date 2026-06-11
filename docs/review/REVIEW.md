@@ -193,6 +193,7 @@ implemented by delegated sub-agents that did not commit), **pending maintainer r
 | `2212423` | **Phase A step 15**: `irq_handlers[]` lock (IRQ-02/#55, pair copied under lock); chip-owned EOI via `irq_chip_end` → `pic_chip_end` does LAPIC+8259 (IRQ-01/#47); spurious 8259 IRQ7/IRQ15 + LAPIC 0xFF filtered before dispatch (kills the "Unhandled interrupt 47" flood AND the wrong slave EOI it sent) | **#47, #55** ✅ |
 | `166887a` | sched: **SCHED-IRQ-01** — `schedule()` masks IRQs itself before `get_cpu_info()`; no-switch exits restore, switch exit returns masked (IRET/ERET loads next frame's flags).  Closes the nested-schedule class for every syscall entry state | SCHED-IRQ-01 ✅ |
 | `db503a3` | gui/input: focus reset on window destroy → top-most surviving window by Z-order (was hardcoded PID 7); per-keystroke IRQ-context log → pr_debug | trace triage ✅ |
+| `f37d137` | sched/init: **deterministic service respawn** — init treats `wait()==-2` as "child gone" (was racing the auto-reaper: respawn worked on aarch64 runs, not amd64); `process_terminate` parked check generalised to ALL sleeping victims (IPC sleepers were freed immediately without a `current_task` check — never a waitable corpse + SCHED-UAF-family hazard).  Verified both arches: `exit`→respawn, external `kill` of sleeping notify→respawn | user-reported ✅ |
 
 Rows `3f9f81f` through `94c936c` are the **W3 issue-tier** fix phase — small, scoped, additive
 correctness/security hardening on the issue backlog, distinct from the boot/crash fixes above.
@@ -223,7 +224,7 @@ use 64-bit). Exercised at runtime every boot (keyboard input + `notify()`). No c
 amd64 ACPI-MADT CPU count (ARCH-01), real PCI/ACPI init (ARCH-02); async block I/O
 (DRV-VIRTIO-08 — reads still busy-wait, now with IRQs masked under the blk lock);
 blocking `wait()` + exit-status collection (needs SCHED-06 parent/child links);
-legacy virtio-pci transport hang (addendum 11 §2.4); the kernel/userland
+legacy virtio-pci transport hang (addendum 11 §2.5); the kernel/userland
 higher-half **addressing rework** (the central PA==VA invariant); W^X (MM-VMM-01/AMMU-01);
 and re-commenting the headers + `.S` files reverted in Phase 2 (all C sources are
 commented and committed).  **All Phase A residuals are now closed**: step 14

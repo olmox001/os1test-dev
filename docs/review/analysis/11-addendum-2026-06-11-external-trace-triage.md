@@ -110,7 +110,26 @@ on the reap stack → double `pmm_free_pages`/`vmm_destroy_pgd`).
 `process_wait` is now a pure reporter (pid / -1 alive / -2 reaped); corpse
 freeing has exactly one owner: the scheduler reaper.
 
-### 2.4 Legacy virtio-blk-pci hangs at first read (open, low priority)
+### 2.4 Supervisor respawn was racing the reaper (user-reported, fixed `f37d137`)
+User report: "the first shell respawns on aarch64 but not on amd64".  Not an
+arch bug — two stacked defects made init's supervision probabilistic:
+(1) init respawned only on `wait(pid)==pid`; with auto-reap (`b9aad52`) the
+kernel frees corpses on its own, so init had to *catch the corpse in the
+pre-drain window* — won on the observed aarch64 runs, lost on amd64 (pure
+scheduling timing).  `wait()==-2` (already reaped) is now treated as "child
+gone" too.  (2) `process_terminate` freed a SLEEPING non-waitqueue victim
+(a shell blocked in `sys_ipc_recv` — its normal state) immediately and
+unconditionally: never a waitable corpse (always -2), and the free did not
+check `current_task` — an IPC sleeper that had not yet switched away could
+have its stack/PGD freed under a running CPU (pre-existing SCHED-UAF-family
+hazard).  The terminate tail is now unified with a parked check for ALL
+non-running states.  NOTE: the initial auto-reap landing (`b9aad52`)
+*tightened* this race for supervisors — the original triage (§1.1) missed
+that `init.c` polls `wait()`; corrected here.  Verified both arches:
+`exit` → respawn, external `kill` of the IPC-sleeping notify server →
+respawn, ps clean, 0 panics.
+
+### 2.5 Legacy virtio-blk-pci hangs at first read (open, low priority)
 Booting amd64 with virtio devices instantiated as **legacy PCI** (no
 `disable-legacy=on`) hangs at "Partition: Initializing..." — the legacy
 port-I/O path never completes the first read.  The canonical QEMU flags
@@ -145,5 +164,5 @@ in this batch.
 2. **Blocking `wait()` + exit-status collection**: needs parent/child links
    (SCHED-06); auto-reap intentionally discards status today.
 3. **Focus/permission model**: syscall 232 unguarded (ABI-04) → epic #93.
-4. **Legacy virtio-pci transport** (§2.4) → Phase B driver epic.
+4. **Legacy virtio-pci transport** (§2.5) → Phase B driver epic.
 5. Everything in §1.3 (epics #92/#93/#95).
