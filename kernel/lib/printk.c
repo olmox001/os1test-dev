@@ -36,6 +36,7 @@
 #include <drivers/uart.h>
 #include <kernel/arch.h>
 #include <kernel/cpu.h>
+#include <kernel/fault.h>
 #include <kernel/irq.h>
 #include <kernel/printk.h>
 #include <kernel/sched.h>
@@ -217,6 +218,26 @@ void panic(const char *fmt, ...) {
 
   /* Signal all CPUs to stop BEFORE printing so no interleaving after this */
   __sync_fetch_and_add(&panic_flag, 1);
+
+  /* Fault context (kernel/fault.h): printk would take uart_lock (possibly
+   * held by a wedged CPU) and needs get_cpu_info — on amd64 a LAPIC-MMIO read
+   * that may itself fault.  Use the lock-free emergency path instead; print
+   * FIRST, then attempt the quiesce IPI (its MMIO write may be the thing
+   * that is broken). */
+  if (fault_depth() > 0) {
+    fault_printf("\n\n*** KERNEL PANIC (fault context) ***\n");
+    va_start(args, fmt);
+    fault_vprintf(fmt, args);
+    va_end(args);
+    fault_printf("\n\nSystem halted.\n");
+    irq_send_ipi_all();
+
+    uint64_t fflags;
+    arch_local_irq_save_all(&fflags);
+    while (1) {
+      arch_idle();
+    }
+  }
 
   /* Send IPI (SGI0) to halt all other CPUs */
   irq_send_ipi_all();

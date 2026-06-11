@@ -33,6 +33,7 @@
  *     active — that is wrong.  See uaccess.c Known issues.
  */
 #include <kernel/cpu.h>
+#include <kernel/fault.h>
 #include <kernel/printk.h>
 #include <kernel/sched.h>
 #include <kernel/string.h>
@@ -151,11 +152,37 @@ void arch_cpu_init(void) {
  * cpu_data[0] if the ID is out of range (paranoia guard for early boot).
  *
  * Side effects: none.  May be called from interrupt context.
+ * NOTE: arch_get_cpu_id reads LAPIC MMIO — NOT safe from a fault handler on a
+ * compromised address space; fault paths use arch_cpu_info_fault_safe below.
  */
 struct cpu_info *get_cpu_info(void) {
   uint32_t id = arch_get_cpu_id();
   if (id >= MAX_CPUS) return &cpu_data[0];
   return &cpu_data[id];
+}
+
+/*
+ * arch_cpu_info_fault_safe - per-CPU info with no faultable dependencies
+ * (kernel/fault.h, Phase A step 5).
+ *
+ * The LAPIC-MMIO read in arch_get_cpu_id needs a live page-table mapping —
+ * exactly what a freed-PGD fault destroys.  Instead read the IA32_GS_BASE MSR
+ * (rdmsr: register-only, cannot fault) and validate it against the cpu_data[]
+ * bounds BEFORE any dereference.  This also covers the two GS hazards:
+ *   - user GS base (fault inside the syscall-entry window before swapgs):
+ *     fails the bounds check -> NULL, no wild dereference;
+ *   - pre-cpu_init MSR garbage: same.
+ */
+struct cpu_info *arch_cpu_info_fault_safe(void) {
+  uint32_t lo, hi;
+  __asm__ __volatile__("rdmsr" : "=a"(lo), "=d"(hi) : "c"(0xC0000101u));
+  uintptr_t p = ((uintptr_t)hi << 32) | lo;
+  uintptr_t base = (uintptr_t)&cpu_data[0];
+  if (p < base || p >= base + sizeof(cpu_data))
+    return NULL;
+  if ((p - base) % sizeof(struct cpu_info) != 0)
+    return NULL;
+  return (struct cpu_info *)p;
 }
 
 /*

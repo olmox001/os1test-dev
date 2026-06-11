@@ -47,6 +47,7 @@
 
 /* Exception frame structure */
 #include <kernel/cpu.h>
+#include <kernel/fault.h>
 #include <kernel/sched.h>
 
 #include <kernel/arch.h>
@@ -55,6 +56,20 @@
 /* External definitions from core */
 extern struct cpu_info cpu_data[MAX_CPUS];
 extern uint32_t nr_cpus;
+
+/*
+ * arch_cpu_info_fault_safe - per-CPU info with no faultable dependencies
+ * (kernel/fault.h, Phase A step 5).
+ *
+ * On aarch64 the CPU id comes from MPIDR_EL1 — a system-register read that
+ * cannot fault — so this is simply the bounds-checked cpu_data[] lookup.
+ */
+struct cpu_info *arch_cpu_info_fault_safe(void) {
+  uint32_t id = arch_impl_get_cpu_id();
+  if (id >= MAX_CPUS)
+    return NULL;
+  return &cpu_data[id];
+}
 
 /* External functions from assembly */
 extern void exception_vectors_install(void);
@@ -190,6 +205,22 @@ struct pt_regs *sync_handler(struct pt_regs *frame) {
   /* ESR_EL1[31:26]: Exception Class — identifies the exception type */
   ec = (esr >> 26) & 0x3F;
 
+  /* SVC from EL0 is a syscall, not a fault: bypass the recursion guard and
+   * every fault-path primitive entirely. */
+  if (ec == 0x15)
+    return syscall_handler(frame);
+
+  /* Fault recursion guard (Phase A step 7): an abort inside this handler used
+   * to recurse on the kernel stack until silent death.  Detect nesting FIRST
+   * — before anything that could itself abort — and stop with one raw line.
+   * fault_exit() runs on every resuming path below; the panic path keeps the
+   * depth elevated so panic() selects its fault-safe output mode. */
+  if (fault_enter() > 1) {
+    fault_printf("\n[FATAL] NESTED EL1 EXCEPTION EC=0x%x ELR=%016lx FAR=%016lx — halting\n",
+                 ec, elr, far);
+    arch_cpu_halt();
+  }
+
   /* Probe recovery: if a Data Abort (EC=0x24/0x25) or Instruction Abort
    * (EC=0x20/0x21) fires while a RAM probe is in progress, set probe_failed
    * and skip the faulting instruction by advancing ELR_EL1 by 4.
@@ -200,37 +231,37 @@ struct pt_regs *sync_handler(struct pt_regs *frame) {
     probe_failed = true;
     /* Skip the faulting instruction (increment ELR by 4) */
     frame->elr += 4;
+    fault_exit();
     return frame;
   }
 
+  /* One-line classification banner.  fault_printf (not printk): the address
+   * space and lock state are unknown at this point for EL1-origin faults. */
   switch (ec) {
   case 0x00: /* Unknown exception — ESR does not encode a specific cause */
-    pr_err("Unknown exception at 0x%016lx\n", elr);
+    fault_printf("Unknown exception at 0x%016lx\n", elr);
     break;
-
-  case 0x15: /* SVC instruction from AArch64 EL0 — syscall entry point */
-    return syscall_handler(frame);
 
   case 0x20: /* Instruction abort from lower EL (EL0 code page not mapped) */
   case 0x21: /* Instruction abort from same EL (EL1 instruction fault — kernel bug) */
-    pr_err("Instruction abort at 0x%016lx, FAR=0x%016lx\n", elr, far);
+    fault_printf("Instruction abort at 0x%016lx, FAR=0x%016lx\n", elr, far);
     break;
 
   case 0x24: /* Data abort from lower EL (EL0 load/store to unmapped/protected addr) */
   case 0x25: /* Data abort from same EL (EL1 load/store fault — kernel bug or probe) */
-    pr_err("Data abort at 0x%016lx, FAR=0x%016lx\n", elr, far);
+    fault_printf("Data abort at 0x%016lx, FAR=0x%016lx\n", elr, far);
     break;
 
   case 0x26: /* SP alignment fault — SP not 16-byte aligned on exception entry */
-    pr_err("SP alignment fault at 0x%016lx\n", elr);
+    fault_printf("SP alignment fault at 0x%016lx\n", elr);
     break;
 
   default:
-    pr_err("Unhandled exception EC=0x%x at 0x%016lx\n", ec, elr);
+    fault_printf("Unhandled exception EC=0x%x at 0x%016lx\n", ec, elr);
     break;
   }
 
-  if (ec != 0x15) {
+  {
     /* Determine the fault origin to choose between process termination and panic.
      *
      * is_user_fault: SPSR.M[3:0] encodes the EL and SP at the time of exception.
@@ -274,40 +305,47 @@ struct pt_regs *sync_handler(struct pt_regs *frame) {
       pr_err("Terminating PID %d\n", current_process->pid);
 
       process_terminate(current_process->pid);
+      fault_exit(); /* fault handled — unwind the recursion guard */
       return schedule(frame);
     }
 
 
-    pr_err("%s", "--- Kernel Exception Context Dump ---\n");
-    pr_err("Process: PID %d\n",
-           current_process ? (int)current_process->pid : -1);
-    pr_err("SPSR_EL1: 0x%016lx\n", frame->spsr);
-    pr_err("ELR_EL1:  0x%016lx\n", frame->elr);
-    pr_err("FAR_EL1:  0x%016lx\n", far);
-    pr_err("ESR_EL1:  0x%016lx\n", esr);
-    pr_err("EC: 0x%x, ISS: 0x%x\n", ec, (uint32_t)(esr & 0xFFFFFF));
+    /* Kernel fault: the address space may be compromised — every line below
+     * goes through fault_printf (lock-free, no per-CPU buffer).  panic() at
+     * the end sees fault_depth() > 0 and uses its fault-safe output mode. */
+    fault_printf("%s", "--- Kernel Exception Context Dump ---\n");
+    fault_printf("Process: PID %d\n",
+                 current_process ? (int)current_process->pid : -1);
+    fault_printf("SPSR_EL1: 0x%016lx\n", frame->spsr);
+    fault_printf("ELR_EL1:  0x%016lx\n", frame->elr);
+    fault_printf("FAR_EL1:  0x%016lx\n", far);
+    fault_printf("ESR_EL1:  0x%016lx\n", esr);
+    fault_printf("EC: 0x%x, ISS: 0x%x\n", ec, (uint32_t)(esr & 0xFFFFFF));
 
     if (elr == 0) {
-        pr_err("%s", "CRITICAL: Kernel jumped to NULL! Check exception vector table and function pointers.\n");
-        pr_err("Stack at 0x%lx:\n", (uint64_t)frame);
+        fault_printf("%s", "CRITICAL: Kernel jumped to NULL! Check exception vector table and function pointers.\n");
+        fault_printf("Stack at 0x%lx:\n", (uint64_t)frame);
         for (int i = 0; i < 8; i++) {
-            pr_err("  [%p] 0x%016lx\n", (void*)&((uint64_t*)frame)[i*2], ((uint64_t*)frame)[i*2]);
+            fault_printf("  [%p] 0x%016lx\n", (void*)&((uint64_t*)frame)[i*2], ((uint64_t*)frame)[i*2]);
         }
     }
 
     for (int i = 0; i < 31; i += 2) {
       if (i + 1 < 31) {
-        pr_err("X%02d: 0x%016lx  X%02d: 0x%016lx\n", i, frame->regs[i], i + 1,
-               frame->regs[i + 1]);
+        fault_printf("X%02d: 0x%016lx  X%02d: 0x%016lx\n", i, frame->regs[i], i + 1,
+                     frame->regs[i + 1]);
       } else {
-        pr_err("X%02d: 0x%016lx\n", i, frame->regs[i]);
+        fault_printf("X%02d: 0x%016lx\n", i, frame->regs[i]);
       }
     }
-    pr_err("SP_EL0:  0x%016lx\n", frame->sp_el0);
-    pr_err("%s", "-----------------------------\n");
+    fault_printf("SP_EL0:  0x%016lx\n", frame->sp_el0);
+    fault_printf("%s", "-----------------------------\n");
     panic("Unrecoverable kernel exception");
   }
 
+  /* Unreachable today (the block above either schedules or panics); kept so
+   * any future early-return path unwinds the recursion guard correctly. */
+  fault_exit();
   return frame;
 }
 

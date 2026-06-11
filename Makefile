@@ -172,6 +172,7 @@ KERN_C_SOURCES += \
     $(KERNEL_DIR)/lib/crc32.c \
     $(KERNEL_DIR)/lib/vsnprintf.c \
     $(KERNEL_DIR)/lib/printk.c \
+    $(KERNEL_DIR)/lib/fault_print.c \
     $(KERNEL_DIR)/lib/stack_protector.c \
     $(KERNEL_DIR)/lib/math.c \
     $(KERNEL_DIR)/lib/kmalloc.c \
