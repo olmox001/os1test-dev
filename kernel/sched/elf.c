@@ -48,11 +48,12 @@ int process_load_elf(struct process *proc, const char *path) {
       /* ELF-01: reject a PT_LOAD whose VA is not wholly inside the user window
        * [0x70000000, 0xC0000000).  User ELFs link at 0x80000000 (Makefile
        * -Wl,-Ttext); their lowest segment is the header page at 0x7ffff000 and
-       * the user stack base is 0xC0000000.  Under the PA==VA identity map a
-       * segment below this window (e.g. a binary mis-linked at the kernel base,
-       * 0x40080000) maps straight over kernel RAM and corrupts it.  Reject here,
-       * before allocating or mapping anything.  (Conservative interim bound: the
-       * precise per-arch limit is part of the higher-half / PA-VA rework.) */
+       * the user stack base is 0xC0000000.  With the higher-half split the
+       * kernel no longer lives in the low half at all, but the window check
+       * stays: it rejects mis-linked binaries outright, keeps segments clear
+       * of the stack area, and on amd64 prevents a crafted p_vaddr with high
+       * bits set from indexing the COPIED kernel PML4 entries (256..511) and
+       * writing through the shared kernel PDPTs. */
       if (phdr.p_vaddr < 0x70000000UL || phdr.p_vaddr >= 0xC0000000UL ||
           phdr.p_memsz > 0xC0000000UL - phdr.p_vaddr) {
         pr_err("ELF: PT_LOAD vaddr 0x%lx (memsz 0x%lx) outside user range "

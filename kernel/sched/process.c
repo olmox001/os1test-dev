@@ -1303,6 +1303,12 @@ long sys_getprocs(struct ps_info *user_buf, size_t max_count) {
   kfree(k_buf);
   return count;
 }
+/* SBRK_HEAP_LIMIT: hard ceiling for the user heap.  The user stack lives at
+ * [0xC0000000, 0xC0100000); without a bound a process could sbrk() its heap
+ * straight into (or past) the stack mappings.  16MB of guard gap below the
+ * stack base. */
+#define SBRK_HEAP_LIMIT 0xBF000000UL
+
 long sys_sbrk(intptr_t increment) {
   struct process *proc = current_process;
   uint64_t old_brk = proc->heap_end;
@@ -1313,6 +1319,10 @@ long sys_sbrk(intptr_t increment) {
   }
 
   if (increment > 0) {
+    /* Bound the heap: no overflow past the guard below the user stack. */
+    if (new_brk < old_brk || new_brk > SBRK_HEAP_LIMIT) {
+      return -ENOMEM;
+    }
     /* Map from current end up to new end */
     uint64_t start_map = (old_brk + 4095) & ~(4095ULL);
     uint64_t end_map = (new_brk + 4095) & ~(4095ULL);
@@ -1320,19 +1330,19 @@ long sys_sbrk(intptr_t increment) {
     for (uint64_t vaddr = start_map; vaddr < end_map; vaddr += 4096) {
       void *paddr = pmm_alloc_page();
       if (!paddr) {
-        return -1;
+        return -ENOMEM;
       }
       memset(paddr, 0, 4096);
       /* PAGE_USER_DATA: the user heap is never executable (W^X, ELF-02). */
       if (vmm_map_page_locked(proc, vaddr, virt_to_phys(paddr), PAGE_USER_DATA) != 0) {
         pmm_free_page(paddr);
-        return -1;
+        return -ENOMEM;
       }
     }
   } else {
     /* Shrinking the heap */
     if (new_brk < proc->heap_start) {
-      return -1;
+      return -EINVAL;
     }
 
     uint64_t start_unmap = (new_brk + 4095) & ~(4095ULL);
