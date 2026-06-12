@@ -184,11 +184,21 @@ W2-class refinements (AMMU-04..07, MM-KM-02..06, MM-PMM-03..06,
 MM-BUF-02..05) remain open under the epic.  HAL isolation held: zero
 `platform.c` edits (amd64).
 
-### B3 — Epic #93: coherent ABI + capabilities
-Single syscall numbering (ABI-01), errno model (ABI-02), per-process fd
-table (ABI-03), capability checks killing ABI-04 (any process can kill PIDs,
-steal focus via syscall 232, overwrite files), formal IPC API (the external
-review's "no IPC model" point), registry auth (USR-SEC-01).
+### B3 — Epic #93: coherent ABI + capabilities — **IN PROGRESS (2026-06-12)**
+**Batch 1 (`0bef4c3`)**: single syscall numbering in
+`include/api/syscall_nums.h` shared by kernel switch + userland .S stubs
+(ABI-01 #88, ABI-SYS-01 #75; duplicate IPC 30/31/32 removed, TRY_RECV→233,
+SET_FOCUS finally public); negative-errno model kernel-wide (ABI-02 #89);
+ABI-05 yield-after-send fixed; sbrk heap ceiling 0xBF000000 (stack guard).
+**Batch 2 (`11f642a`)**: capability layer at the dispatcher — KILL =
+self/children/SYSTEM-ROOT via new `parent_pid` + `process_kill_allowed`
+(ABI-04 #91, USR-SEC-02 #78); SET_FOCUS self-only; DESTROY_WINDOW
+owner-only (`compositor_window_owner`); FILE_WRITE denies /bin + /sys to
+non-SYSTEM (EXT4-02 #57); registry first-writer-wins key ownership
+(LIB-REG-02 #73, USR-SEC-01 #77).  Smoke-tested live on both arches
+(kill init/notify denied, kill own child allowed).
+**Remaining**: per-process fd table (ABI-03 #90), formal IPC API,
+sandboxing (USR-SEC-03 #79 — epic-level outcome).
 
 ### B4 — Epic #94: amd64 parity (ACPI-MADT CPU count ARCH-01, real
 PCI/ACPI init ARCH-02, FPU/XMM save on context switch CPU-AMD64-01,
