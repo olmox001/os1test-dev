@@ -37,13 +37,22 @@
  *   still return their own negatives (mapped to -EIO/-ENOENT where the
  *   cause is unambiguous).
  *
+ * Capability checks (ABI-04, B3 batch 2):
+ *   SYS_KILL         caller must be SYSTEM/ROOT, the target itself, or the
+ *                    target's parent (process_kill_allowed) — else -EPERM.
+ *   SYS_SET_FOCUS    self-focus only for user processes — else -EPERM.
+ *   SYS_DESTROY_WINDOW  owner or SYSTEM only — else -EPERM.
+ *   SYS_FILE_WRITE   the /bin and /sys trees are write-protected for
+ *                    non-SYSTEM callers (EXT4-02) — else -EACCES.
+ *   SYS_REGISTRY     write ownership enforced in registry_set
+ *                    (LIB-REG-02/USR-SEC-01) — foreign keys give -EACCES.
+ *   Kernel-internal paths (compositor close button, init supervision,
+ *   process teardown) call the underlying functions directly and bypass
+ *   these checks by design.
+ *
  * Known issues:
  *   ABI-03  (W3 WRONG-DESIGN) No per-process fd table: fd 0=stdin(IPC),
  *           1/2=window-by-pid, >=100=window id.  Neither POSIX nor Plan 9.
- *   ABI-04  (W4 SECURITY) No capability/permission checks: any process may
- *           kill any non-system PID (SYS_KILL), steal keyboard focus
- *           (SYS_SET_FOCUS), destroy any window (SYS_DESTROY_WINDOW), or
- *           write any file (SYS_FILE_WRITE).
  *   ABI-06  (W2 BUG/PERF) sys_write() silently truncates writes > 1023 bytes
  *           and unconditionally echoes every write to the UART (debug leftover).
  *   ABI-07  (W2 BUG) SYS_SPAWN disables IRQs across process_create +
@@ -51,8 +60,6 @@
  *   GFX-FONT-01  (W4 SECURITY/BUG) SYS_SET_FONT: stores a raw user
  *           pointer into kernel globals; dereferenced in IRQ-context rendering
  *           (sys_set_font in graphics/font.c) → UAF / info-leak.
- *   EXT4-02  (W4 SECURITY) SYS_FILE_WRITE: no access control;
- *           any PID can overwrite any file, including /init.
  */
 #include <kernel/types.h>
 #include <arch/pt_regs.h>
@@ -203,9 +210,20 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     pt_regs_set_return(frame, 0);
     break;
   case SYS_DESTROY_WINDOW:
+  {
+    /* ABI-04: only the window's owner (or a system process) may destroy it.
+     * Kernel-internal teardown (close button, process exit) calls
+     * compositor_destroy_window() directly and is unaffected. */
+    extern int compositor_window_owner(int window_id);
+    int owner = compositor_window_owner((int)arg0);
+    if (owner >= 0 && owner != (int)current_process->pid &&
+        !(current_process->permissions & PROC_PERM_SYSTEM)) {
+      pt_regs_set_return(frame, -EPERM);
+      break;
+    }
     compositor_destroy_window((int)arg0);
     pt_regs_set_return(frame, 0);
-    break;
+  } break;
   case SYS_SBRK:
     pt_regs_set_return(frame, sys_sbrk((intptr_t)arg0));
     break;
@@ -233,6 +251,12 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     arch_local_irq_enable();
   } break;
   case SYS_KILL:
+    /* ABI-04: a process may kill itself or its direct children; SYSTEM/ROOT
+     * may kill anything (process_terminate still protects SYSTEM targets). */
+    if (!process_kill_allowed(current_process, (int)arg0)) {
+      pt_regs_set_return(frame, -EPERM);
+      break;
+    }
     pt_regs_set_return(frame, process_terminate((int)arg0));
     break;
   case SYS_GETPROCS:
@@ -263,8 +287,14 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     pt_regs_set_return(frame, sys_ipc_try_recv((int)arg0, (void *)arg1));
     break;
   case SYS_SET_FOCUS:
-    /* NOTE(ABI-04): No permission check; any user process can redirect the
-     * global keyboard focus to any PID, including system processes. */
+    /* ABI-04: a process may only claim focus for ITSELF (every userland
+     * caller does set_focus(get_pid())); redirecting input to/from another
+     * PID — i.e. keystroke stealing — needs PROC_PERM_SYSTEM. */
+    if ((int)arg0 != (int)current_process->pid &&
+        !(current_process->permissions & PROC_PERM_SYSTEM)) {
+      pt_regs_set_return(frame, -EPERM);
+      break;
+    }
     keyboard_focus_pid = (int)arg0;
     pt_regs_set_return(frame, 0);
     break;
@@ -284,6 +314,18 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     }
     char resolved_path[128];
     vfs_resolve_path(k_path, resolved_path, 128);
+    /* EXT4-02 (ABI-04 family): the binary trees are write-protected for
+     * non-system processes — a user process must not be able to overwrite
+     * anything under /bin or /sys (services, init chain).  Config/data
+     * files (/etc, user files) stay writable. */
+    if (!(current_process->permissions & PROC_PERM_SYSTEM) &&
+        (strncmp(resolved_path, "/sys/", 5) == 0 ||
+         strncmp(resolved_path, "/bin/", 5) == 0)) {
+      pr_warn("FILE_WRITE: PID %d denied write to protected path '%s'\n",
+              current_process->pid, resolved_path);
+      pt_regs_set_return(frame, -EACCES);
+      break;
+    }
     size_t size = (size_t)arg2;
     if (size > SYSCALL_MAX_IO_BYTES) {  /* FIX(EXT4-07): reject absurd user size */
       pt_regs_set_return(frame, -EINVAL);

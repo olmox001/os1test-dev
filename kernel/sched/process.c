@@ -380,6 +380,35 @@ struct process *process_find_by_pid(int pid) {
 }
 
 /*
+ * process_kill_allowed - ABI-04 capability check for SYS_KILL.
+ *
+ * Policy (checked under sched_lock so the target cannot be recycled
+ * mid-decision):
+ *   - PROC_PERM_SYSTEM / PROC_PERM_ROOT callers may kill anything
+ *     (process_terminate itself still refuses SYSTEM targets);
+ *   - any process may kill itself (exit alias) and its DIRECT children
+ *     (parent_pid == caller->pid);
+ *   - everything else is denied.
+ * A missing target is "allowed": process_terminate() reports the real
+ * -ESRCH-equivalent and keeps the historical return value for it.
+ */
+int process_kill_allowed(struct process *caller, int target_pid) {
+  if (!caller)
+    return 1; /* kernel context */
+  if (caller->permissions & (PROC_PERM_SYSTEM | PROC_PERM_ROOT))
+    return 1;
+  if ((int)caller->pid == target_pid)
+    return 1;
+
+  uint64_t flags;
+  spin_lock_irqsave(&sched_lock, &flags);
+  struct process *target = __process_find_by_pid(target_pid);
+  int allowed = !target || target->parent_pid == (int)caller->pid;
+  spin_unlock_irqrestore(&sched_lock, flags);
+  return allowed;
+}
+
+/*
  * process_create - allocate and initialise a new process descriptor.
  *
  * Allocates a single PMM page for the struct process, assigns a PID from
@@ -432,6 +461,9 @@ struct process *process_create(const char *name, uint8_t priority,
   proc->priority = priority;
 
   proc->permissions = permissions;
+  /* Parentage for the SYS_KILL capability check (ABI-04): the spawner is
+   * whatever process is current on this CPU; kernel/boot creations get 0. */
+  proc->parent_pid = current_process ? (int)current_process->pid : 0;
 
   /* Init Scheduler Info */
   proc->state = PROC_CREATED;
