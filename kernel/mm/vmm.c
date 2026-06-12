@@ -351,12 +351,13 @@ int vmm_map(uint64_t *pgd, uint64_t virt, uint64_t phys, uint64_t size,
  * amd64 PTE_NX (EFER.NXE set at boot) + CR0.WP for the read-only text.
  */
 void vmm_map_ram_wx(uint64_t *pgd, uint64_t base, uint64_t size) {
-  extern char __kernel_start[], _etext[], __erodata[];
+  extern char __text_start[], _etext[], __erodata[];
   /* Section symbols are link (virtual) addresses; 'base'/'cur' iterate
    * PHYSICAL addresses — compare in the physical domain and map each
-   * chunk at its direct-map VA (phys_to_virt; identity while
-   * KERNEL_VIRT_BASE == 0). */
-  uint64_t tx_s = virt_to_phys(__kernel_start) & ~0xFFFUL;
+   * chunk at its direct-map VA (phys_to_virt).  The RX window starts at
+   * __text_start, NOT __kernel_start: on amd64 the latter also covers the
+   * low boot region (1..2MB), which is data once the kernel runs. */
+  uint64_t tx_s = virt_to_phys(__text_start) & ~0xFFFUL;
   uint64_t tx_e = (virt_to_phys(_etext) + 4095) & ~0xFFFUL;
   uint64_t ro_e = (virt_to_phys(__erodata) + 4095) & ~0xFFFUL;
   uint64_t end = base + size;

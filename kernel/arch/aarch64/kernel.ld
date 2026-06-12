@@ -14,6 +14,7 @@ SECTIONS
     
     /* Code section */
     .text : {
+        __text_start = .;       /* W^X RX window start (vmm_map_ram_wx) */
         KEEP(*(.text.boot))     /* Boot code first */
         *(.text)
         *(.text.*)

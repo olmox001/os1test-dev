@@ -130,17 +130,28 @@ void arch_vmm_init_hw(uint64_t kernel_pgd) {
    * only the BSP runs, so local flushes were sufficient. */
   amd64_tlb_ipi_init();
 
-  /* Identity map all detected RAM regions */
+  /* Pre-populate the kernel half's top-level slots (PML4 256..259, i.e.
+   * direct-map VAs for PA 0..2TB) with empty PDPTs.  Process PML4s share
+   * the kernel half by COPYING entries 256..511 at creation time; a
+   * top-level entry created later (e.g. arch_vmm_map_device for a >512GB
+   * BAR) would be invisible to already-created processes.  Pre-allocating
+   * the PDPTs makes those slots shared pointers from day one. */
+  uint64_t *pml4_va = (uint64_t *)phys_to_virt(kernel_pgd);
+  for (int i = 256; i < 260; i++) {
+    if (!(pml4_va[i] & X86_PTE_P)) {
+      void *pdpt = pmm_alloc_page();
+      if (!pdpt)
+        break;
+      memset(pdpt, 0, PAGE_SIZE);
+      pml4_va[i] = virt_to_phys(pdpt) | X86_PTE_P | X86_PTE_RW;
+    }
+  }
+
+  /* Map all detected RAM regions (the low-2MB identity window for the
+   * SMP trampoline is part of arch_vmm_map_mmio, so EVERY kernel PGD —
+   * this one and vmm_dynamic_remap's — gets it). */
   size_t count = 0;
   struct mem_region *regions = arch_platform_get_mem_regions(&count);
-
-  /* Map low 1MB for SMP trampolines and legacy BIOS data areas.
-   * TRAMPOLINE_BASE (0x1000) must be writable so arch_cpu_wake_secondary
-   * can copy trampoline code there and patch the PML4/stack/entry fields.
-   * NX is safe here: APs execute the trampoline in real mode (paging off)
-   * and the long-mode stub runs on trampoline_pml4 (its own tables), never
-   * on kernel_pgd. */
-  arch_vmm_map_range(kernel_pgd, 0, 0, 0x100000, PAGE_KERNEL);
 
   for (size_t i = 0; i < count; i++) {
     if (regions[i].type == MEM_REGION_USABLE) {
@@ -179,13 +190,25 @@ void arch_vmm_init_hw(uint64_t kernel_pgd) {
  */
 void arch_vmm_map_mmio(uint64_t *pgd) {
   /* Map PCI MMIO and System MMIO (0xFE000000 to 0xFFFFFFFF) at their
-   * direct-map VAs (phys_to_virt; identity while KERNEL_VIRT_BASE == 0).
+   * direct-map VAs (phys_to_virt).
    * Covers PCI devices, LAPIC, IOAPIC, and upper BIOS ranges.
    * NOTE(AMMU-06): ~8192 individual 4KB map calls per PGD — inefficient. */
   for (uint64_t addr = 0xFE000000UL; addr < 0xFFFFFFFFUL; addr += 4096) {
     arch_vmm_map(virt_to_phys(pgd), (uint64_t)phys_to_virt(addr), addr,
                  PAGE_DEVICE);
   }
+
+  /* Identity-map the low 2MB into every KERNEL PGD (this function is
+   * called for the phase-1 PGD and for vmm_dynamic_remap's, never for
+   * process PGDs):
+   *  - [0, 1MB): SMP trampoline target (TRAMPOLINE_BASE 0x1000 must be
+   *    writable: arch_cpu_wake_secondary copies and patches it there) and
+   *    legacy BIOS data areas.
+   *  - [1MB, 2MB): the low-linked boot sections (kernel.ld) — platform.c
+   *    reads the trampoline blob via its low link address.
+   * NX is safe: APs execute the trampoline in real mode (paging off) and
+   * then on boot_pml4, never through these kernel_pgd entries. */
+  arch_vmm_map_range(virt_to_phys(pgd), 0, 0, 0x200000, PAGE_KERNEL);
 }
 
 /*
@@ -493,65 +516,23 @@ uint64_t arch_vmm_create_process_pgd(void) {
 
   memset(new_pml4, 0, PAGE_SIZE);
 
-  /* 
-   * AMD64 Paging Architecture:
-   * PML4 index 0 to 255: Lower Half (User Space + Identity Map Kernel)
-   * PML4 index 256 to 511: Higher Half (Kernel space / Alias)
+  /*
+   * Higher-half model (memlayout.h):
+   *   PML4 index 0..255   user half — starts EMPTY; the ELF loader / sbrk
+   *                       populate it via arch_vmm_map().
+   *   PML4 index 256..511 kernel half — shared by copying the kernel_pgd
+   *                       entries by value.  Every kernel top-level slot
+   *                       that can ever be needed (direct map of RAM and
+   *                       device BARs: 256..259, pre-populated by
+   *                       arch_vmm_init_hw) already exists, so later
+   *                       kernel mappings land in SHARED PDPTs and are
+   *                       visible to every process automatically.
+   * Nothing else is cloned: no low identity, no per-process MMIO map.
    */
-
   extern uint64_t *kernel_pgd;
-  
-  /* 1. Copy Higher Half (Indices 256-511) - These are fully shared kernel tables */
   for (int i = 256; i < 512; i++) {
     new_pml4[i] = kernel_pgd[i];
   }
-
-  /* 
-   * 2. Handle Index 0 (Identity Map + User Space)
-   * We CANNOT share the PDPT at index 0 because it will be modified for user space.
-   * We must allocate a private PDPT for the new process and only copy the 
-   * kernel-specific identity mappings into it.
-   */
-  uint64_t *new_pdpt = (uint64_t *)pmm_alloc_page();
-  if (!new_pdpt) {
-    pmm_free_page(new_pml4);
-    return 0;
-  }
-  memset(new_pdpt, 0, PAGE_SIZE);
-
-  /* Link new PDPT to index 0 of PML4 (entries hold PHYSICAL addresses) */
-  new_pml4[0] = virt_to_phys(new_pdpt) | X86_PTE_P | X86_PTE_RW | X86_PTE_US;
-
-  /* 3. Clone ONLY the essential part of the identity map (0-1GB).
-   * This covers the kernel (at 1MB) and boot structures.
-   * User-space addresses (2GB+) will use their own private tables.
-   */
-  uint64_t *kern_pud0 = (uint64_t *)phys_to_virt(kernel_pgd[0] & PTE_ADDR_MASK);
-  if (kern_pud0) {
-    /* PDPT index 0 covers 0-1GB. Identity map RAM is here. */
-    if (kern_pud0[0] & X86_PTE_P) {
-        new_pdpt[0] = kern_pud0[0];
-    }
-  }
-
-  /* 5. Clone kernel device-MMIO entries from PML4 indices 1..255.
-   * Fix AMMU-07 (>4GB MMIO): when QEMU places a 64-bit virtio BAR above 4 GB
-   * (e.g. 0xc000000000 at -m 8G), arch_vmm_map_device() adds the mapping to
-   * kernel_pgd at PML4 index 1 (0xc000000000 >> 39 == 1).  Without this loop,
-   * process PML4s only clone index 0 and 256..511, leaving index 1 absent and
-   * causing a PAGE FAULT when the MMIO BAR is accessed from a process/AP
-   * address space.  Indices 1..255 are never used for user ELF/stack (those
-   * live in index 0, VA <= ~3 GB), so sharing these kernel entries is safe.
-   * Reference: AMMU-07 / >4GB MMIO fix. */
-  for (int i = 1; i < 256; i++) {
-    if (kernel_pgd[i] & X86_PTE_P)
-      new_pml4[i] = kernel_pgd[i];
-  }
-
-  /* 4. Map MMIO ranges manually into the new PGD to ensure they have their own
-   * private path if they share a PDPT with user space.
-   */
-  arch_vmm_map_mmio(new_pml4);
 
   /* Contract: return the PGD's PHYSICAL address (vmm_create_pgd converts). */
   return virt_to_phys(new_pml4);
