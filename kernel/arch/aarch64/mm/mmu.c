@@ -5,8 +5,9 @@
  * Role:
  *   Provides the arch_vmm_* interface required by the generic VMM layer
  *   (kernel/mm/vmm.c) and by the kernel boot path (cpu.c:arch_vmm_init_hw).
- *   All operations are in terms of physical addresses because the kernel
- *   identity-maps itself via TTBR0_EL1 for the low 4GB.
+ *   PGD arguments are PHYSICAL addresses; table memory is dereferenced
+ *   through phys_to_virt() (higher-half direct map, kernel/memlayout.h).
+ *   The kernel half lives in TTBR1_EL1; per-process user tables in TTBR0.
  *
  * Page table layout (ARMv8-A 48-bit VA, 4KB granule, TCR.T0SZ=16):
  *   Level 0 (PGD) — 9 bits [47:39] — table descriptor only (512 entries × 8B).

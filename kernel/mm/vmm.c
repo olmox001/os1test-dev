@@ -27,12 +27,11 @@
  * Known issues:
  *   MM-VMM-01  (FIXED)           W^X enforced via vmm_map_ram_wx(): kernel
  *                                 text RX, rodata RO+NX, all other RAM RW+NX.
- *   MM-VMM-02  walker half RESOLVED (Phase B2): all walkers translate PTE
- *                                 physical addresses through phys_to_virt()
- *                                 and store via virt_to_phys(); the identity
- *                                 assumption is centralized in vmm.h.  The
- *                                 higher-half migration itself remains a
- *                                 dedicated future change.
+ *   MM-VMM-02  RESOLVED (Phase B2): all walkers translate PTE physical
+ *                                 addresses through phys_to_virt() and
+ *                                 store via virt_to_phys(); the kernel now
+ *                                 RUNS in the higher half on both arches
+ *                                 (KERNEL_VIRT_BASE in memlayout.h).
  *   MM-VMM-03  (W2 REFINE/TODO)  vmm_dynamic_remap leaks the old PGD.
  *   MM-VMM-04  (W3 BUG)          vmm_destroy_pgd leaks user RAM frames and
  *                                 contains a dead empty loop.
@@ -70,10 +69,11 @@
 #define PT_INDEX(x) (((x) >> PT_SHIFT) & 0x1FF)
 
 /* Global Kernel PGD */
-/* kernel_pgd - physical address of the current kernel page-global directory.
- * Under the identity-map invariant this value is also a valid C pointer.
- * Updated atomically (pointer assignment) in vmm_dynamic_remap() after the
- * hardware TTBR/CR3 has been switched; secondary CPUs read it after arch_mb(). */
+/* kernel_pgd - kernel VIRTUAL pointer to the current kernel page-global
+ * directory (the hardware register gets virt_to_phys(kernel_pgd): TTBR1 on
+ * aarch64, CR3 on amd64).  Updated atomically (pointer assignment) in
+ * vmm_dynamic_remap() after the hardware root has been switched; secondary
+ * CPUs read it after arch_mb(). */
 uint64_t *kernel_pgd;
 
 #define PTE_ADDR_MASK 0x0000FFFFFFFFF000UL
@@ -91,15 +91,9 @@ uint64_t *kernel_pgd;
  * Returns: pointer to the next-level table, or NULL if not present and
  *          alloc==0, or NULL if pmm_alloc_page() fails.
  *
- * NOTE(MM-VMM-02): When an existing entry is present, the physical address is
- * extracted from bits [47:12] of the PTE and cast DIRECTLY to a uint64_t *
- * pointer.  This is only correct under the identity-map invariant (VA==PA).
- * On a higher-half or KASLR kernel this would dereference a wrong address.
- *
- * NOTE(MM-VMM-02): When allocating a new table, pmm_alloc_page() returns a
- * value that is simultaneously the physical address stored in the PTE AND the
- * C pointer used to clear the page.  The in-code comments at lines 54-63
- * of the original source acknowledge this confusion explicitly.
+ * PA/VA: entries hold PHYSICAL addresses; dereferences go through
+ * phys_to_virt() and new tables are installed via virt_to_phys()
+ * (MM-VMM-02 resolved — see kernel/memlayout.h).
  *
  * Locking: caller must hold the relevant PGD/process mm_lock; this helper
  * does not take any lock itself.
@@ -107,8 +101,7 @@ uint64_t *kernel_pgd;
 static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc) {
   if (table[index] & PTE_VALID) {
     /* Table entries store PHYSICAL addresses (48 bits supported); translate
-     * through phys_to_virt() — the single documented chokepoint for the
-     * identity-map assumption (MM-VMM-02). */
+     * through phys_to_virt() (direct map, MM-VMM-02). */
     uint64_t phys = table[index] & 0x0000FFFFFFFFF000UL;
     return (uint64_t *)phys_to_virt(phys);
   }
@@ -156,7 +149,8 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc) {
  * large contiguous ranges.
  *
  * Parameters:
- *   pgd   - physical address of the PGD (also a valid pointer under identity map).
+ *   pgd   - kernel virtual pointer to the PGD (converted to its PA for the
+ *           arch layer via virt_to_phys).
  *   virt  - virtual address to map; must be 4KB-aligned.
  *   phys  - physical address to map to; must be 4KB-aligned.
  *   flags - PTE attribute flags (PAGE_KERNEL_EXEC, PAGE_USER, etc.).
@@ -205,11 +199,8 @@ int vmm_map_page_locked(struct process *proc, uint64_t virt, uint64_t phys,
  * Returns 0 if every PTE is present and satisfies the flags_mask, or -1 as
  * soon as any level is missing or a PTE fails the mask check.
  *
- * NOTE(MM-VMM-02): Internally calls get_next_table(), which casts PTE
- * physical addresses to pointers under the identity-map assumption.
- *
  * Parameters:
- *   pgd        - PGD to walk (physical address / identity-mapped pointer).
+ *   pgd        - PGD to walk (kernel virtual pointer).
  *   virt       - start virtual address (rounded down to 4KB boundary).
  *   size       - length in bytes (rounded up to 4KB boundary).
  *   flags_mask - set of PTE bits that must all be present; 0 skips flag check.
@@ -253,7 +244,7 @@ int vmm_check_range(uint64_t *pgd, uint64_t virt, uint64_t size,
  * vmm_get_phys - translate a virtual address to its mapped physical address.
  *
  * Delegates entirely to arch_vmm_get_physical(); refer to the arch
- * implementation for details on the walk and the identity-map assumptions.
+ * implementation for details on the walk (blocks/large pages included).
  *
  * Returns the physical address, or 0 / arch-defined sentinel on unmapped VA.
  */
@@ -336,13 +327,13 @@ int vmm_map(uint64_t *pgd, uint64_t virt, uint64_t phys, uint64_t size,
 }
 
 /*
- * vmm_map_ram_wx - identity-map RAM with the W^X section split
+ * vmm_map_ram_wx - map RAM at its direct-map VA with the W^X section split
  * (MM-VMM-01 / AMMU-01 resolved).
  *
  * The kernel image layout (kernel.ld, both arches) is:
- *   [__kernel_start, _etext)    text (+ amd64 multiboot/PVH headers)  → RX
+ *   [__text_start, _etext)      text                                  → RX
  *   [_etext≈, __erodata)        rodata, .ktests, .ksyms               → RO+NX
- *   everything else              data/bss/heap/stacks/DTB/user pool    → RW+NX
+ *   everything else              data/bss/heap/stacks/DTB/boot region  → RW+NX
  * Boundaries are page-rounded; the linker aligns sections to 4 KB so the
  * windows never overlap.  arch_vmm_map_range still uses 2MB blocks inside
  * each window where alignment permits.
@@ -390,19 +381,23 @@ void vmm_map_ram_wx(uint64_t *pgd, uint64_t base, uint64_t size) {
 /*
  * Initialize VMM and Enable MMU
  *
- * vmm_init - phase-1 MMU bring-up: map a 128 MB bootstrap window and enable
- *            the MMU.
+ * vmm_init - phase-1 VMM bring-up: build the first real kernel PGD (128 MB
+ *            bootstrap window) and install it as the kernel root.
+ *
+ * The MMU itself is already ON when this runs: the boot assembly (both
+ * arches) enables it with boot tables so C executes at its higher-half
+ * link address from the first instruction.
  *
  * Steps:
  *   1. Allocate and zero the kernel PGD from the PMM (sets global kernel_pgd).
- *   2. Map [ARCH_RAM_START, ARCH_RAM_START+128MB) via vmm_map_ram_wx()
- *      (W^X section split).
+ *   2. Map [ARCH_RAM_START, ARCH_RAM_START+128MB) at the direct-map VAs via
+ *      vmm_map_ram_wx() (W^X section split).
  *   3. Map MMIO regions via arch_vmm_map_mmio().
- *   4. Enable the MMU by passing virt_to_phys(kernel_pgd) to arch_vmm_init_hw().
- *      Under identity map, virt_to_phys is a no-op cast.
+ *   4. Install virt_to_phys(kernel_pgd) as the kernel root via
+ *      arch_vmm_init_hw() (TTBR1 on aarch64, CR3 on amd64).
  *
- * After vmm_init() the kernel executes with the MMU active.  Only the first
- * 128 MB of RAM are accessible; vmm_dynamic_remap() extends coverage.
+ * After vmm_init() only the first 128 MB of RAM are mapped;
+ * vmm_dynamic_remap() extends coverage to all detected RAM.
  *
  * Locking: must be called single-threaded before SMP bring-up.
  */
@@ -548,8 +543,8 @@ uint64_t *vmm_create_pgd(void) {
  * processes today (ELF loader and sbrk map freshly allocated frames; IPC,
  * blits and font loads copy by value).  Revisit when shared mappings arrive.
  *
- * NOTE(MM-VMM-02): table physical addresses are cast to pointers under the
- * identity-map invariant.
+ * Table physical addresses are dereferenced through phys_to_virt()
+ * (MM-VMM-02 resolved).
  *
  * Locking: caller must ensure no other CPU holds or will use this PGD
  * (process fully stopped and de-scheduled; see the scheduler reaper).

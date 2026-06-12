@@ -31,11 +31,10 @@
  * 0x0000_0000_0000_0000 - 0x0000_FFFF_FFFF_FFFF : User Space (256 TB)
  * 0xFFFF_0000_0000_0000 - 0xFFFF_FFFF_FFFF_FFFF : Kernel Space (256 TB)
  *
- * NOTE(MM-VMM-02): This higher-half layout is the target design.  The
- * kernel still runs identity-mapped (KERNEL_VIRT_BASE == 0 in
- * memlayout.h), but every PA-to-pointer crossing already goes through
- * phys_to_virt()/virt_to_phys(), so the flip is confined to memlayout.h
- * plus the per-arch boot/linker changes.
+ * MM-VMM-02 RESOLVED: this layout is now LIVE on both arches.  The kernel
+ * image and the direct map of all RAM/MMIO live at KERNEL_VIRT_BASE + PA
+ * (memlayout.h); user space owns the low half exclusively (aarch64: TTBR0
+ * per process; amd64: PML4 entries 0..255 private per process).
  */
 
 /* PTE flag constants -- selected by arch at compile time. */
@@ -201,8 +200,9 @@ void vmm_unmap_page_locked(struct process *proc, uint64_t virt);
 
 /* vmm_map: map a contiguous range; 4KB pages only; partial on error (no rollback). */
 int vmm_map(uint64_t *pgd, uint64_t virt, uint64_t phys, uint64_t size, uint64_t flags);
-/* vmm_map_ram_wx: identity-map a usable RAM range with the W^X section split:
- * kernel text RX, rodata RO+NX, everything else RW+NX (MM-VMM-01/AMMU-01). */
+/* vmm_map_ram_wx: map a usable RAM range at its direct-map VA with the W^X
+ * split: kernel text RX, rodata RO+NX, everything else RW+NX
+ * (MM-VMM-01/AMMU-01). */
 void vmm_map_ram_wx(uint64_t *pgd, uint64_t base, uint64_t size);
 /* vmm_check_range: verify all pages in range are mapped with required flags. */
 int vmm_check_range(uint64_t *pgd, uint64_t virt, uint64_t size, uint64_t flags_mask);

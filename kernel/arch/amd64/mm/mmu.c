@@ -3,7 +3,7 @@
  * x86-64 Four-Level Paging (PML4 / PDPT / PD / PT) Implementation
  *
  * Responsibilities:
- *   - arch_vmm_init_hw: switch to the kernel PML4, identity-map all usable
+ *   - arch_vmm_init_hw: switch to the kernel PML4, direct-map all usable
  *     RAM regions reported by the platform, and map the MMIO window.
  *   - arch_vmm_map / arch_vmm_unmap / arch_vmm_get_physical: single-page
  *     4KB operations that walk/allocate/free PML4→PDPT→PD→PT chains.
@@ -13,14 +13,19 @@
  *     clone; teardown is the generic vmm_destroy_pgd in kernel/mm/vmm.c).
  *   - arch_vmm_protect: 4KB-precise attribute rewrite of existing mappings
  *     (splits large pages as needed; ends with an SMP TLB shootdown).
- *   - arch_vmm_map_mmio: identity-maps the PCI/LAPIC/MMIO window at
- *     0xFE000000–0xFFFFFFFF (8192 × 4KB pages per PGD setup call).
+ *   - arch_vmm_map_mmio: maps the PCI/LAPIC/MMIO window 0xFE000000–
+ *     0xFFFFFFFF at its direct-map VA + the low-2MB identity window for
+ *     the SMP trampoline and the low-linked boot sections.
  *
- * Invariants:
- *   - Identity map: PA == VA for all kernel and RAM mappings.  Pointer casts
- *     between physical addresses and virtual pointers are valid.
- *   - Boot PML4 (boot_pml4): established by start.S; the kernel upgrades to
- *     a dynamic PML4 (arch_vmm_init_hw) before enabling the PMM.
+ * Invariants (higher-half model, see kernel/memlayout.h):
+ *   - Kernel VA = PA + KERNEL_VIRT_BASE (0xFFFF800000000000) for the image,
+ *     all RAM and MMIO; PA<->pointer crossings go through
+ *     phys_to_virt()/virt_to_phys().  The kernel half lives in PML4
+ *     entries 256..511, shared with processes by value-copy at creation.
+ *   - Boot PML4 (boot_pml4, identity + higher-half alias of PA 0..1GB):
+ *     established by start.S; the kernel switches to the dynamic PML4 in
+ *     arch_vmm_init_hw; APs still boot on boot_pml4 and adopt kernel_pgd
+ *     in arch_cpu_init.
  *   - Intermediate page-table pages are allocated from pmm_alloc_page() and
  *     are never freed; the page-table tree only grows.
  *
@@ -490,22 +495,18 @@ uint64_t arch_vmm_create_process_pgd(void);
 /*
  * arch_vmm_create_process_pgd - allocate a PML4 for a new user process.
  *
- * Strategy:
+ * Strategy (higher-half model):
  *   1. Allocate a fresh PML4 page, zeroed.
- *   2. Copy the higher-half kernel entries (PML4 indices 256-511) from
- *      kernel_pgd.  These are shared, read-only references — all processes
- *      see the same kernel VA range without per-process kernel mappings.
- *   3. Allocate a private PDPT for PML4 index 0 (covers VA 0–511 GB).
- *      The first PDPT entry is copied from the kernel PML4 to preserve the
- *      identity map for the first 1 GB (RAM + trampoline).
- *      PML4 index 0 cannot be shared with kernel_pgd because user-space
- *      mappings are added to PDPT index 1+ and would cross into the kernel's
- *      identity map if shared.
- *   4. Map the MMIO window into the new PML4 so the new process can access
- *      device registers without separate per-process MMIO setup.
+ *   2. Copy the kernel-half entries (PML4 indices 256-511) from kernel_pgd
+ *      by value.  arch_vmm_init_hw pre-populates every slot the kernel can
+ *      ever need (256..259), so the copies always point at SHARED PDPTs and
+ *      later kernel mappings are visible to all processes automatically.
+ *   3. The user half (indices 0..255) starts EMPTY; the ELF loader and
+ *      sbrk populate it on demand via arch_vmm_map().
  *
  * Teardown: the generic vmm_destroy_pgd() (kernel/mm/vmm.c) walks the
- * private index-0 subtree built here and reclaims table pages + user frames.
+ * private index-0 subtree built on demand and reclaims table pages + user
+ * frames; the copied kernel-half entries are never descended.
  *
  * Returns the physical address of the new PML4, or 0 on allocation failure.
  */

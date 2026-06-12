@@ -12,14 +12,13 @@
  * single offset converts in both directions for ANY kernel virtual
  * address (image symbols, PMM allocations, MMIO pointers alike).
  *
- * The offset is currently 0 on both arches: the kernel still runs
- * identity-mapped, and phys_to_virt()/virt_to_phys() compile to the old
- * identity casts.  The higher-half migration flips the constant per arch
- * (aarch64: 0xFFFF000000000000 via TTBR1; amd64: 0xFFFF800000000000,
- * PML4 slot 256+) together with the boot-code/linker changes — nothing
- * outside this header and the boot path has to change again.
+ * The higher half is LIVE on both arches (aarch64: 0xFFFF000000000000 via
+ * TTBR1; amd64: 0xFFFF800000000000, PML4 slot 256+).  The boot assembly
+ * enables the MMU with boot tables before any C runs, so kernel code only
+ * ever executes at its link address; user space owns the low half
+ * exclusively.
  *
- * Contract for the rest of the tree (enforced by the Phase-B2/B3 sweeps):
+ * Contract for the rest of the tree (enforced by the Phase-B2 sweep):
  *   - uint64_t values named pa/phys/pgd_addr are PHYSICAL addresses;
  *     pointers are kernel VIRTUAL addresses.
  *   - pmm_alloc_*() return kernel virtual pointers; what hardware needs
