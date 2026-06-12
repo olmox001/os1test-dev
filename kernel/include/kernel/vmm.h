@@ -190,6 +190,11 @@ int vmm_map_page(uint64_t *pgd, uint64_t virt, uint64_t phys, uint64_t flags);
 /* vmm_unmap_page: unmap one page with cross-CPU TLB shootdown (MM-VMM-05
  * resolved): on return no online CPU translates 'virt' via the old entry. */
 void vmm_unmap_page(uint64_t *pgd, uint64_t virt);
+/* vmm_protect: rewrite the attributes of existing mappings in [virt,
+ * virt+size) to the given PAGE/PTE profile (AMMU-02 resolved).  Frame
+ * addresses are preserved; large pages are split for 4KB precision; ends
+ * with a cross-CPU TLB shootdown.  Returns 0, or -1 on a hole in range. */
+int vmm_protect(uint64_t *pgd, uint64_t virt, uint64_t size, uint64_t flags);
 uint64_t vmm_get_phys(uint64_t *pgd, uint64_t virt);
 
 struct process;

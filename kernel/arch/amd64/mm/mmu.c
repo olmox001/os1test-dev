@@ -11,7 +11,8 @@
  *     and size permit, falling back to 4KB pages.
  *   - arch_vmm_create_process_pgd: process address-space creation (PML4
  *     clone; teardown is the generic vmm_destroy_pgd in kernel/mm/vmm.c).
- *   - arch_vmm_protect: stub (returns 0 without updating PTEs).
+ *   - arch_vmm_protect: 4KB-precise attribute rewrite of existing mappings
+ *     (splits large pages as needed; ends with an SMP TLB shootdown).
  *   - arch_vmm_map_mmio: identity-maps the PCI/LAPIC/MMIO window at
  *     0xFE000000–0xFFFFFFFF (8192 × 4KB pages per PGD setup call).
  *
@@ -24,11 +25,11 @@
  *     are never freed; the page-table tree only grows.
  *
  * Known issues:
- *   AMMU-01 (W3 SECURITY) No W^X: kernel RAM is mapped RW without NX because
- *     the NX condition '(PTE_UXN && PTE_PXN)' in arch_vmm_map:136-137 is
- *     never satisfied for kernel pages (which pass PTE_RW, not PTE_PXN).
- *   AMMU-02 (W3 STUB/SECURITY) arch_vmm_protect is a no-op stub; runtime
- *     permission changes (mprotect, code-signing) are silently ignored.
+ *   AMMU-01 RESOLVED (Phase B2, b745a74): x86_leaf_flags() translates the
+ *     vmm.h profiles explicitly (opt-in RW, native PTE_NX honoured);
+ *     vmm_map_ram_wx() maps text RX, rodata RO+NX, other RAM RW+NX.
+ *   AMMU-02 RESOLVED (Phase B2): arch_vmm_protect is real — 4KB-precise
+ *     attribute rewrite with large-page splitting and SMP TLB shootdown.
  *   AMMU-03 (FIXED) the divergent arch teardown was removed; the single
  *     path is vmm_destroy_pgd() in kernel/mm/vmm.c, which frees private
  *     table pages and PTE_USER frames (see its ownership rules).
@@ -329,16 +330,19 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc, int 
  *
  * Returns 0 on success, -1 if any page-table page allocation fails.
  */
-int arch_vmm_map(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t flags) {
-  uint64_t *pml4 = (uint64_t *)pgd;
+/*
+ * x86_leaf_flags - translate arch-neutral PTE/PAGE profile bits to x86 PTE bits.
+ *
+ * Flag translation (AMMU-01 resolved): callers pass the amd64 PTE/PAGE
+ * profiles from vmm.h, which carry the final x86 bits — translate them
+ * explicitly.  Writability is OPT-IN (PTE_RW present), so read-only user
+ * segments and kernel text are actually read-only (CR0.WP is set).  NX is
+ * honoured both natively (PTE_NX) and from the arch-neutral UXN+PXN
+ * encoding used by shared code.  Shared by arch_vmm_map, the 2MB path of
+ * arch_vmm_map_range, and arch_vmm_protect.
+ */
+static uint64_t x86_leaf_flags(uint64_t flags) {
   uint64_t x86_flags = X86_PTE_P;
-
-  /* Flag translation (AMMU-01 resolved): callers pass the amd64 PTE/PAGE
-   * profiles from vmm.h, which carry the final x86 bits — translate them
-   * explicitly.  Writability is now OPT-IN (PTE_RW present), so read-only
-   * user segments and kernel text are actually read-only (CR0.WP is set).
-   * NX is honoured both natively (PTE_NX) and from the arch-neutral
-   * UXN+PXN encoding used by shared code. */
   if (flags & PTE_USER)
     x86_flags |= X86_PTE_US;
   if (flags & PTE_RW)
@@ -349,6 +353,12 @@ int arch_vmm_map(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t flags) {
     x86_flags |= X86_PTE_PCD;
   if ((flags & PTE_NX) || ((flags & PTE_UXN) && (flags & PTE_PXN)))
     x86_flags |= X86_PTE_NX;
+  return x86_flags;
+}
+
+int arch_vmm_map(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t flags) {
+  uint64_t *pml4 = (uint64_t *)pgd;
+  uint64_t x86_flags = x86_leaf_flags(flags);
 
   /* Walk (and allocate if absent) PML4 → PDPT → PD → PT */
   uint64_t *pdpt = get_next_table(pml4, PML4_INDEX(va), 1, 0);
@@ -416,10 +426,10 @@ int arch_vmm_unmap(uint64_t pgd, uint64_t va) {
  * present.  On success returns (leaf_PTE & PTE_ADDR_MASK) | (va & 0xFFF),
  * which is the physical byte address corresponding to 'va'.
  *
- * NOTE: Does not handle 2MB or 1GB large-page entries; those would have the
- * PS bit set in the PDE/PDPTE and this code would misinterpret them as
- * pointing to a next-level table.  This is a subtle gap for ranges mapped
- * via arch_vmm_map_range with the 2MB path.  Cross-ref AMMU-04.
+ * Handles 1GB (PDPTE.PS) and 2MB (PDE.PS) large pages by combining the
+ * block base with the in-block offset of 'va' — previously these were
+ * misread as table pointers and the lookup returned 0/garbage for any
+ * address inside the 2MB-mapped RAM identity window.
  */
 uint64_t arch_vmm_get_physical(uint64_t pgd, uint64_t va) {
   uint64_t *pml4 = (uint64_t *)pgd;
@@ -428,13 +438,19 @@ uint64_t arch_vmm_get_physical(uint64_t pgd, uint64_t va) {
     return 0;
   uint64_t *pdpt = (uint64_t *)(pml4[PML4_INDEX(va)] & PTE_ADDR_MASK);
 
-  if (!(pdpt[PDPT_INDEX(va)] & X86_PTE_P))
+  uint64_t pdpte = pdpt[PDPT_INDEX(va)];
+  if (!(pdpte & X86_PTE_P))
     return 0;
-  uint64_t *pd = (uint64_t *)(pdpt[PDPT_INDEX(va)] & PTE_ADDR_MASK);
+  if (pdpte & 0x080) /* 1GB page */
+    return ((pdpte & PTE_ADDR_MASK) & ~0x3FFFFFFFULL) | (va & 0x3FFFFFFFULL);
+  uint64_t *pd = (uint64_t *)(pdpte & PTE_ADDR_MASK);
 
-  if (!(pd[PD_INDEX(va)] & X86_PTE_P))
+  uint64_t pde = pd[PD_INDEX(va)];
+  if (!(pde & X86_PTE_P))
     return 0;
-  uint64_t *pt = (uint64_t *)(pd[PD_INDEX(va)] & PTE_ADDR_MASK);
+  if (pde & 0x080) /* 2MB page */
+    return ((pde & PTE_ADDR_MASK) & ~0x1FFFFFULL) | (va & 0x1FFFFFULL);
+  uint64_t *pt = (uint64_t *)(pde & PTE_ADDR_MASK);
 
   if (!(pt[PT_INDEX(va)] & X86_PTE_P))
     return 0;
@@ -546,24 +562,67 @@ uint64_t arch_vmm_create_process_pgd(void) {
  * skips entries shared by value with kernel_pgd. */
 
 /*
- * arch_vmm_protect - change PTE flags for a virtual address range.
+ * arch_vmm_protect - rewrite the attributes of existing 4KB mappings (AMMU-02
+ * resolved).
  *
- * NOTE(AMMU-02): This is a no-op stub.  Runtime permission changes
- * (mprotect, code-signing, seL4-style capability revocation) are silently
- * ignored.  A real implementation must walk the page table for [va, va+size),
- * update the protection bits in each leaf PTE, and flush the TLB for each
- * modified page (with SMP shootdown per AMMU-08).
+ * Params:
+ *   pgd       physical address of the PML4.
+ *   va, size  range to change; rounded outward to page boundaries.
+ *   flags     arch-neutral PTE/PAGE profile (same vocabulary as
+ *             arch_vmm_map); every attribute bit of each leaf PTE is
+ *             replaced via x86_leaf_flags(), only the frame address is kept.
  *
- * Returns 0 always; callers cannot detect that protection was not applied.
+ * A 1GB/2MB large page covering part of the range is first split into the
+ * next finer granularity (get_next_table with alloc=1, which preserves the
+ * translations bit-identically) so the change applies with 4KB precision.
+ *
+ * Returns 0 on success; -1 if any page in the range is unmapped or a split
+ * allocation fails (pages BEFORE the failure keep the new attributes).
+ *
+ * TLB: one SMP shootdown round (full flush, all online CPUs) after the
+ * loop — runs on both success and failure paths so rewritten PTEs are never
+ * masked by stale TLB copies anywhere.
  */
 int arch_vmm_protect(uint64_t pgd, uint64_t va, uint64_t size, uint64_t flags);
 int arch_vmm_protect(uint64_t pgd, uint64_t va, uint64_t size, uint64_t flags) {
-  /* Simple stub: real OS would update PTE flags — NOTE(AMMU-02): unimplemented */
-  (void)pgd;
-  (void)va;
-  (void)size;
-  (void)flags;
-  return 0;
+  uint64_t *pml4 = (uint64_t *)pgd;
+  uint64_t x86_flags = x86_leaf_flags(flags);
+  uint64_t v = va & ~0xFFFUL;
+  uint64_t end = (va + size + 0xFFFUL) & ~0xFFFUL;
+  int rc = 0;
+
+  for (; v < end; v += 4096) {
+    uint64_t pml4e = pml4[PML4_INDEX(v)];
+    if (!(pml4e & X86_PTE_P)) { rc = -1; break; }
+    uint64_t *pdpt = (uint64_t *)(pml4e & PTE_ADDR_MASK);
+
+    uint64_t pdpte = pdpt[PDPT_INDEX(v)];
+    if (!(pdpte & X86_PTE_P)) { rc = -1; break; }
+    uint64_t *pd;
+    if (pdpte & 0x080) {
+      pd = get_next_table(pdpt, PDPT_INDEX(v), 1, 1); /* split 1GB page */
+      if (!pd) { rc = -1; break; }
+    } else {
+      pd = (uint64_t *)(pdpte & PTE_ADDR_MASK);
+    }
+
+    uint64_t pde = pd[PD_INDEX(v)];
+    if (!(pde & X86_PTE_P)) { rc = -1; break; }
+    uint64_t *pt;
+    if (pde & 0x080) {
+      pt = get_next_table(pd, PD_INDEX(v), 1, 2); /* split 2MB page */
+      if (!pt) { rc = -1; break; }
+    } else {
+      pt = (uint64_t *)(pde & PTE_ADDR_MASK);
+    }
+
+    uint64_t pte = pt[PT_INDEX(v)];
+    if (!(pte & X86_PTE_P)) { rc = -1; break; }
+    pt[PT_INDEX(v)] = (pte & PTE_ADDR_MASK) | x86_flags;
+  }
+
+  amd64_tlb_shootdown_all();
+  return rc;
 }
 
 /*
@@ -602,11 +661,7 @@ int arch_vmm_map_range(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t size, ui
 
       /* Level 2 2MB Page Mapping — same explicit translation as
        * arch_vmm_map (opt-in RW, NX from PTE_NX or UXN+PXN). */
-      uint64_t x86_flags = X86_PTE_P | 0x080; /* PS bit for 2MB */
-      if (flags & PTE_USER) x86_flags |= X86_PTE_US;
-      if (flags & PTE_RW) x86_flags |= X86_PTE_RW;
-      if ((flags & PTE_NX) || ((flags & PTE_UXN) && (flags & PTE_PXN)))
-        x86_flags |= X86_PTE_NX;
+      uint64_t x86_flags = x86_leaf_flags(flags) | 0x080; /* PS bit for 2MB */
 
       pd[PD_INDEX(v)] = (p & PTE_ADDR_MASK) | x86_flags;
       v += 0x200000;

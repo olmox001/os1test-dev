@@ -285,6 +285,19 @@ void vmm_unmap_page(uint64_t *pgd, uint64_t virt) {
   arch_vmm_unmap((uint64_t)pgd, virt);
 }
 
+/*
+ * vmm_protect - rewrite the attributes of existing mappings (AMMU-02).
+ *
+ * Thin contract wrapper over arch_vmm_protect(): 'flags' is the arch's
+ * PAGE/PTE profile, frame addresses are preserved, large pages split for
+ * 4KB precision, and a cross-CPU TLB shootdown runs before returning.
+ * Returns 0, or -1 if the range contains an unmapped page (pages before
+ * the hole keep the new attributes).
+ */
+int vmm_protect(uint64_t *pgd, uint64_t virt, uint64_t size, uint64_t flags) {
+  return arch_vmm_protect((uint64_t)pgd, virt, size, flags);
+}
+
 /* Internal helper with locking */
 /*
  * vmm_unmap_page_locked - vmm_unmap_page() wrapped with proc->mm_lock.

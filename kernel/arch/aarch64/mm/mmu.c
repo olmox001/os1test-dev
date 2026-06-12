@@ -130,18 +130,32 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc, int 
       uint64_t sub_flags = block_flags | 0x2;
 
       uint64_t *sub_table = (uint64_t *)new_table;
-      if (level == 1) {
+      /* 'level' is the level of the table being RETURNED (call sites pass
+       * 1/2/3 for the L0→L1, L1→L2, L2→L3 steps).  A block found at the
+       * L1→L2 step (level==2) is a 1GB L1 block; one found at the L2→L3
+       * step (level==3) is a 2MB L2 block.  FIX: the branches previously
+       * tested level==1/level==2, so a 2MB block was "split" into an EMPTY
+       * L3 table — silently unmapping the other 511 pages of the block (the
+       * ELF header-page map at 0x7ffff000 hit exactly this; benign only
+       * because no PMM frame from that physical range was ever handed out). */
+      if (level == 2) {
           /* L1 Block (1GB) -> L2 Table (512 x 2MB blocks).
            * Each child is a 2MB block, so bit 1 stays 0 (block); bit 0 stays 1. */
           for (int i = 0; i < 512; i++) {
             sub_table[i] = (block_pa + (uint64_t)i * 0x200000) | (block_flags & ~0x2) | 0x1;
           }
-      } else if (level == 2) {
+      } else if (level == 3) {
           /* L2 Block (2MB) -> L3 Table (512 x 4KB pages).
            * Each child is an L3 page descriptor (bit 1 = 1). */
           for (int i = 0; i < 512; i++) {
             sub_table[i] = (block_pa + (uint64_t)i * 4096) | sub_flags;
           }
+      } else {
+          /* L0 entries are architecturally always table descriptors; a
+           * "block" here means corruption — refuse instead of fabricating
+           * an empty table. */
+          pmm_free_page(new_table);
+          return NULL;
       }
 
       arch_cache_clean_range(sub_table, 4096); /* write back new sub-table to DRAM */
@@ -291,6 +305,73 @@ int arch_vmm_unmap(uint64_t pgd_addr, uint64_t va) {
 }
 
 /*
+ * arch_vmm_protect - rewrite the attributes of existing 4KB mappings (AMMU-02).
+ *
+ * Parameters:
+ *   pgd_addr  Physical address of the L0 page table.
+ *   va, size  Range to change; rounded outward to page boundaries.
+ *   flags     FULL aarch64 page profile (PAGE_KERNEL / PAGE_KERNEL_RO /
+ *             PAGE_USER_DATA ... — the same vocabulary arch_vmm_map takes):
+ *             every attribute bit of each leaf PTE is replaced; only the
+ *             output address is preserved.
+ *
+ * A 1GB/2MB block covering part of the range is first split into the next
+ * finer granularity (get_next_table with alloc=1) so the change applies with
+ * 4KB precision; translations outside the requested range are preserved
+ * bit-identically by the split.
+ *
+ * Returns 0 on success; -1 if any page in the range is unmapped or a split
+ * allocation fails (pages BEFORE the failure keep the new attributes — the
+ * TLB flush below runs on both paths so the PTEs already rewritten are
+ * never left visible only in stale TLB copies).
+ *
+ * TLB: one broadcast invalidate-all (TLBI VMALLE1IS via arch_tlb_flush_all)
+ * after the loop — cross-CPU by hardware, no IPI needed.
+ */
+int arch_vmm_protect(uint64_t pgd_addr, uint64_t va, uint64_t size, uint64_t flags) {
+  uint64_t *pgd = (uint64_t *)pgd_addr;
+  uint64_t v = va & ~0xFFFUL;
+  uint64_t end = (va + size + 0xFFFUL) & ~0xFFFUL;
+  int rc = 0;
+
+  for (; v < end; v += 4096) {
+    uint64_t pgde = pgd[PGD_INDEX(v)];
+    if (!(pgde & PTE_VALID)) { rc = -1; break; }
+    uint64_t *pud = (uint64_t *)(pgde & PTE_ADDR_MASK); /* L0: always a table */
+
+    uint64_t pude = pud[PUD_INDEX(v)];
+    if (!(pude & PTE_VALID)) { rc = -1; break; }
+    uint64_t *pmd;
+    if (!(pude & 0x2)) {
+      pmd = get_next_table(pud, PUD_INDEX(v), 1, 2); /* split 1GB block */
+      if (!pmd) { rc = -1; break; }
+    } else {
+      pmd = (uint64_t *)(pude & PTE_ADDR_MASK);
+    }
+
+    uint64_t pmde = pmd[PMD_INDEX(v)];
+    if (!(pmde & PTE_VALID)) { rc = -1; break; }
+    uint64_t *pt;
+    if (!(pmde & 0x2)) {
+      pt = get_next_table(pmd, PMD_INDEX(v), 1, 3); /* split 2MB block */
+      if (!pt) { rc = -1; break; }
+    } else {
+      pt = (uint64_t *)(pmde & PTE_ADDR_MASK);
+    }
+
+    uint64_t *pte = &pt[PT_INDEX(v)];
+    if (!(*pte & PTE_VALID)) { rc = -1; break; }
+    *pte = (*pte & PTE_ADDR_MASK) | flags;
+    arch_cache_clean_range(pte, 8); /* visible to the hardware walker */
+  }
+
+  arch_mb();            /* DSB ISH: PTE writes complete before TLBI */
+  arch_tlb_flush_all(); /* TLBI VMALLE1IS: broadcast to all PEs */
+  arch_isb();
+  return rc;
+}
+
+/*
  * arch_vmm_get_physical - translate a virtual address to its physical address.
  *
  * Parameters:
@@ -306,23 +387,29 @@ int arch_vmm_unmap(uint64_t pgd_addr, uint64_t va) {
  * where PTE_ADDR_MASK extracts the OA [47:12] and (va & 0xFFF) restores the
  * 12-bit page offset from the original virtual address.
  *
- * Note: This function does not handle block mappings (L1/L2 blocks).  If a
- * block mapping exists at L1 or L2, get_next_table with alloc=0 returns NULL
- * for the "is this a block?" check, and the function returns 0. [static, known
- * limitation — see get_next_table for block handling when alloc=1]
+ * Handles 1GB (L1) and 2MB (L2) block descriptors by combining the block
+ * base OA with the in-block offset of 'va' — previously a block anywhere on
+ * the walk made the function return 0 (get_next_table with alloc=0 refuses
+ * blocks), so lookups inside the 2MB-block RAM identity map always failed.
  */
 uint64_t arch_vmm_get_physical(uint64_t pgd_addr, uint64_t va) {
   uint64_t *pgd = (uint64_t *)pgd_addr;
-  uint64_t *pud, *pmd, *pt;
 
-  pud = get_next_table(pgd, PGD_INDEX(va), 0, 1);
-  if (!pud) return 0;
+  uint64_t pgde = pgd[PGD_INDEX(va)];
+  if (!(pgde & PTE_VALID)) return 0;
+  uint64_t *pud = (uint64_t *)(pgde & PTE_ADDR_MASK); /* L0: always a table */
 
-  pmd = get_next_table(pud, PUD_INDEX(va), 0, 2);
-  if (!pmd) return 0;
+  uint64_t pude = pud[PUD_INDEX(va)];
+  if (!(pude & PTE_VALID)) return 0;
+  if (!(pude & 0x2)) /* 1GB L1 block */
+    return ((pude & PTE_ADDR_MASK) & ~0x3FFFFFFFUL) | (va & 0x3FFFFFFFUL);
+  uint64_t *pmd = (uint64_t *)(pude & PTE_ADDR_MASK);
 
-  pt = get_next_table(pmd, PMD_INDEX(va), 0, 3);
-  if (!pt) return 0;
+  uint64_t pmde = pmd[PMD_INDEX(va)];
+  if (!(pmde & PTE_VALID)) return 0;
+  if (!(pmde & 0x2)) /* 2MB L2 block */
+    return ((pmde & PTE_ADDR_MASK) & ~0x1FFFFFUL) | (va & 0x1FFFFFUL);
+  uint64_t *pt = (uint64_t *)(pmde & PTE_ADDR_MASK);
 
   uint64_t entry = pt[PT_INDEX(va)];
   if (!(entry & PTE_VALID)) return 0;

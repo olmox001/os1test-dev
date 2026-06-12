@@ -65,6 +65,13 @@ void arch_vmm_map_mmio(uint64_t *pgd);
 int arch_vmm_map(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t flags);
 int arch_vmm_map_range(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t size, uint64_t flags);
 int arch_vmm_unmap(uint64_t pgd, uint64_t va);
+/* arch_vmm_protect: rewrite the attributes of existing 4KB mappings in
+ * [va, va+size).  'flags' is the arch's PAGE/PTE profile (same vocabulary
+ * as arch_vmm_map); the frame address is preserved, every attribute bit is
+ * replaced.  Large pages covering the range are split first.  Ends with a
+ * cross-CPU TLB shootdown.  Returns 0, or -1 on a hole in the range
+ * (already-rewritten pages keep the new attributes). */
+int arch_vmm_protect(uint64_t pgd, uint64_t va, uint64_t size, uint64_t flags);
 uint64_t arch_vmm_get_physical(uint64_t pgd, uint64_t va);
 void arch_vmm_set_secondary_pgd(uint64_t pgd);
 
