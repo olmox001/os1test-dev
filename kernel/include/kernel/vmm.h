@@ -10,8 +10,16 @@
  *   phys_to_virt() and virt_to_phys() below are identity casts -- they return
  *   their argument unchanged.  This correctly models the current runtime where
  *   kernel VA == PA for the RAM window.
- *   NOTE(MM-VMM-02): any code that calls these and relies on them being no-ops
- *   will break if a higher-half or offset-mapped kernel is ever introduced.
+ *
+ *   MM-VMM-02 (walker half, resolved Phase B2): every page-table walker
+ *   (kernel/mm/vmm.c and both arch mmu.c) now routes PTE-physical-address
+ *   dereferences through phys_to_virt() and stores entries via
+ *   virt_to_phys(), so the identity assumption lives HERE and nowhere else
+ *   in the walk paths.  The remaining identity dependencies (PMM metadata
+ *   pointers MM-PMM-07, pmm_alloc return values used as pointers, MMIO,
+ *   kernel link address) are the higher-half migration proper — a dedicated
+ *   future change that starts by making these two functions real
+ *   translations.
  *
  * Known issues (see docs/review/analysis/01-mm-memory-management.md):
  *   MM-VMM-01 through MM-VMM-07.

@@ -282,12 +282,12 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc, int 
       /* Replace the block entry with a pointer to the new sub-table.
        * NOTE(AMMU-05): X86_PTE_US on an intermediate entry; kernel-only
        * intermediate tables do not need to be user-accessible. */
-      table[index] = (uint64_t)new_table | X86_PTE_P | X86_PTE_RW | X86_PTE_US;
+      table[index] = virt_to_phys(new_table) | X86_PTE_P | X86_PTE_RW | X86_PTE_US;
       return (uint64_t *)new_table;
     }
     /* Entry is present and not a large page: return the next-level table PA.
      * Identity-map invariant: PA == VA, so the cast is safe. */
-    return (uint64_t *)(entry & PTE_ADDR_MASK);
+    return (uint64_t *)phys_to_virt(entry & PTE_ADDR_MASK);
   }
 
   if (!alloc) return NULL;
@@ -298,7 +298,7 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc, int 
   memset(page, 0, PAGE_SIZE);
 
   /* NOTE(AMMU-05): X86_PTE_US on intermediate table entry */
-  table[index] = (uint64_t)page | X86_PTE_P | X86_PTE_RW | X86_PTE_US;
+  table[index] = virt_to_phys(page) | X86_PTE_P | X86_PTE_RW | X86_PTE_US;
   return (uint64_t *)page;
 }
 
@@ -357,7 +357,7 @@ static uint64_t x86_leaf_flags(uint64_t flags) {
 }
 
 int arch_vmm_map(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t flags) {
-  uint64_t *pml4 = (uint64_t *)pgd;
+  uint64_t *pml4 = (uint64_t *)phys_to_virt(pgd);
   uint64_t x86_flags = x86_leaf_flags(flags);
 
   /* Walk (and allocate if absent) PML4 → PDPT → PD → PT */
@@ -400,7 +400,7 @@ int arch_vmm_map(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t flags) {
  * Returns 0 always (no failure path for missing entries).
  */
 int arch_vmm_unmap(uint64_t pgd, uint64_t va) {
-  uint64_t *pml4 = (uint64_t *)pgd;
+  uint64_t *pml4 = (uint64_t *)phys_to_virt(pgd);
 
   if (!(pml4[PML4_INDEX(va)] & X86_PTE_P))
     return 0;
@@ -432,7 +432,7 @@ int arch_vmm_unmap(uint64_t pgd, uint64_t va) {
  * address inside the 2MB-mapped RAM identity window.
  */
 uint64_t arch_vmm_get_physical(uint64_t pgd, uint64_t va) {
-  uint64_t *pml4 = (uint64_t *)pgd;
+  uint64_t *pml4 = (uint64_t *)phys_to_virt(pgd);
 
   if (!(pml4[PML4_INDEX(va)] & X86_PTE_P))
     return 0;
@@ -443,14 +443,14 @@ uint64_t arch_vmm_get_physical(uint64_t pgd, uint64_t va) {
     return 0;
   if (pdpte & 0x080) /* 1GB page */
     return ((pdpte & PTE_ADDR_MASK) & ~0x3FFFFFFFULL) | (va & 0x3FFFFFFFULL);
-  uint64_t *pd = (uint64_t *)(pdpte & PTE_ADDR_MASK);
+  uint64_t *pd = (uint64_t *)phys_to_virt(pdpte & PTE_ADDR_MASK);
 
   uint64_t pde = pd[PD_INDEX(va)];
   if (!(pde & X86_PTE_P))
     return 0;
   if (pde & 0x080) /* 2MB page */
     return ((pde & PTE_ADDR_MASK) & ~0x1FFFFFULL) | (va & 0x1FFFFFULL);
-  uint64_t *pt = (uint64_t *)(pde & PTE_ADDR_MASK);
+  uint64_t *pt = (uint64_t *)phys_to_virt(pde & PTE_ADDR_MASK);
 
   if (!(pt[PT_INDEX(va)] & X86_PTE_P))
     return 0;
@@ -524,7 +524,7 @@ uint64_t arch_vmm_create_process_pgd(void) {
    * This covers the kernel (at 1MB) and boot structures.
    * User-space addresses (2GB+) will use their own private tables.
    */
-  uint64_t *kern_pud0 = (uint64_t *)(kernel_pgd[0] & PTE_ADDR_MASK);
+  uint64_t *kern_pud0 = (uint64_t *)phys_to_virt(kernel_pgd[0] & PTE_ADDR_MASK);
   if (kern_pud0) {
     /* PDPT index 0 covers 0-1GB. Identity map RAM is here. */
     if (kern_pud0[0] & X86_PTE_P) {
@@ -585,7 +585,7 @@ uint64_t arch_vmm_create_process_pgd(void) {
  */
 int arch_vmm_protect(uint64_t pgd, uint64_t va, uint64_t size, uint64_t flags);
 int arch_vmm_protect(uint64_t pgd, uint64_t va, uint64_t size, uint64_t flags) {
-  uint64_t *pml4 = (uint64_t *)pgd;
+  uint64_t *pml4 = (uint64_t *)phys_to_virt(pgd);
   uint64_t x86_flags = x86_leaf_flags(flags);
   uint64_t v = va & ~0xFFFUL;
   uint64_t end = (va + size + 0xFFFUL) & ~0xFFFUL;
@@ -594,7 +594,7 @@ int arch_vmm_protect(uint64_t pgd, uint64_t va, uint64_t size, uint64_t flags) {
   for (; v < end; v += 4096) {
     uint64_t pml4e = pml4[PML4_INDEX(v)];
     if (!(pml4e & X86_PTE_P)) { rc = -1; break; }
-    uint64_t *pdpt = (uint64_t *)(pml4e & PTE_ADDR_MASK);
+    uint64_t *pdpt = (uint64_t *)phys_to_virt(pml4e & PTE_ADDR_MASK);
 
     uint64_t pdpte = pdpt[PDPT_INDEX(v)];
     if (!(pdpte & X86_PTE_P)) { rc = -1; break; }
@@ -603,7 +603,7 @@ int arch_vmm_protect(uint64_t pgd, uint64_t va, uint64_t size, uint64_t flags) {
       pd = get_next_table(pdpt, PDPT_INDEX(v), 1, 1); /* split 1GB page */
       if (!pd) { rc = -1; break; }
     } else {
-      pd = (uint64_t *)(pdpte & PTE_ADDR_MASK);
+      pd = (uint64_t *)phys_to_virt(pdpte & PTE_ADDR_MASK);
     }
 
     uint64_t pde = pd[PD_INDEX(v)];
@@ -613,7 +613,7 @@ int arch_vmm_protect(uint64_t pgd, uint64_t va, uint64_t size, uint64_t flags) {
       pt = get_next_table(pd, PD_INDEX(v), 1, 2); /* split 2MB page */
       if (!pt) { rc = -1; break; }
     } else {
-      pt = (uint64_t *)(pde & PTE_ADDR_MASK);
+      pt = (uint64_t *)phys_to_virt(pde & PTE_ADDR_MASK);
     }
 
     uint64_t pte = pt[PT_INDEX(v)];
@@ -652,7 +652,7 @@ int arch_vmm_map_range(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t size, ui
     uint64_t remaining = end - v;
     
     if ((v & 0x1FFFFF) == 0 && (p & 0x1FFFFF) == 0 && remaining >= 0x200000) {
-      uint64_t *pml4 = (uint64_t *)pgd;
+      uint64_t *pml4 = (uint64_t *)phys_to_virt(pgd);
       uint64_t *pdpt = get_next_table(pml4, PML4_INDEX(v), 1, 0);
       if (!pdpt) return -1;
 

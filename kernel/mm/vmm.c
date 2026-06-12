@@ -28,8 +28,12 @@
  * Known issues:
  *   MM-VMM-01  (FIXED)           W^X enforced via vmm_map_ram_wx(): kernel
  *                                 text RX, rodata RO+NX, all other RAM RW+NX.
- *   MM-VMM-02  (W3 WRONG-DESIGN) PTE physical addresses cast to pointers;
- *                                 only valid under identity map.
+ *   MM-VMM-02  walker half RESOLVED (Phase B2): all walkers translate PTE
+ *                                 physical addresses through phys_to_virt()
+ *                                 and store via virt_to_phys(); the identity
+ *                                 assumption is centralized in vmm.h.  The
+ *                                 higher-half migration itself remains a
+ *                                 dedicated future change.
  *   MM-VMM-03  (W2 REFINE/TODO)  vmm_dynamic_remap leaks the old PGD.
  *   MM-VMM-04  (W3 BUG)          vmm_destroy_pgd leaks user RAM frames and
  *                                 contains a dead empty loop.
@@ -103,32 +107,22 @@ uint64_t *kernel_pgd;
  */
 static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc) {
   if (table[index] & PTE_VALID) {
-    /* Extract physical address mask (48 bits supported) */
+    /* Table entries store PHYSICAL addresses (48 bits supported); translate
+     * through phys_to_virt() — the single documented chokepoint for the
+     * identity-map assumption (MM-VMM-02). */
     uint64_t phys = table[index] & 0x0000FFFFFFFFF000UL;
-    /* In full OS, this should be mapped. For early boot, assuming
-     * identity/linear map */
-    return (uint64_t *)phys;
+    return (uint64_t *)phys_to_virt(phys);
   }
 
   if (!alloc)
     return NULL;
 
-  // Allocate new page for table
+  /* Allocate a new page for the table.  pmm_alloc_page() returns a pointer
+   * usable by the kernel; what gets STORED in the entry is its physical
+   * address (virt_to_phys below). */
   void *page = pmm_alloc_page();
   if (!page)
     return NULL;
-
-  // Actually pmm_alloc_page returns physical address + offset if using early
-  // mapping? Wait, pmm returns direct mapped address usually... Let's assume
-  // PMM returns physical address for now as per previous impl? Checking pmm
-  // implementation... PMM returns (MEMORY_BASE + pfn_to_phys) which is physical
-  // address in QEMU space (0x4000...).
-
-  // In our simplified model:
-  // Physical address IS the pointer returned by pmm (since we are 1:1 mapped
-  // currently) But table entries store PHYSICAL addresses.
-
-
 
   /* Zero and Flush the new table page */
   memset(page, 0, 4096);
@@ -140,7 +134,7 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc) {
    *          AP EL0 RW (bit 6-7, usually ignored for tables but safe).
    * AMD64:   Present (bit 0), RW (bit 1), User (bit 2).
    */
-  table[index] = (uint64_t)page | PTE_TABLE | PTE_VALID;
+  table[index] = virt_to_phys(page) | PTE_TABLE | PTE_VALID;
 
   /* Flush the directory entry itself */
   arch_cache_clean_range(&table[index], 8);
@@ -565,9 +559,9 @@ void vmm_destroy_pgd(uint64_t *pgd) {
   uint64_t freed_tables = 0;
 
   uint64_t *pud0 =
-      (pgd[0] & PTE_VALID) ? (uint64_t *)(pgd[0] & PTE_ADDR_MASK) : NULL;
+      (pgd[0] & PTE_VALID) ? (uint64_t *)phys_to_virt(pgd[0] & PTE_ADDR_MASK) : NULL;
   uint64_t *k_pud0 = (kernel_pgd[0] & PTE_VALID)
-                         ? (uint64_t *)(kernel_pgd[0] & PTE_ADDR_MASK)
+                         ? (uint64_t *)phys_to_virt(kernel_pgd[0] & PTE_ADDR_MASK)
                          : NULL;
 
   if (pud0 && pud0 != k_pud0) {
@@ -580,10 +574,10 @@ void vmm_destroy_pgd(uint64_t *pgd) {
       if (!PTE_IS_TABLE(pud_e))
         continue; /* 1GB block: never a user mapping */
 
-      uint64_t *pmd = (uint64_t *)(pud_e & PTE_ADDR_MASK);
+      uint64_t *pmd = (uint64_t *)phys_to_virt(pud_e & PTE_ADDR_MASK);
       uint64_t *k_pmd = NULL;
       if (k_pud0 && (k_pud0[i] & PTE_VALID) && PTE_IS_TABLE(k_pud0[i]))
-        k_pmd = (uint64_t *)(k_pud0[i] & PTE_ADDR_MASK);
+        k_pmd = (uint64_t *)phys_to_virt(k_pud0[i] & PTE_ADDR_MASK);
 
       for (int j = 0; j < 512; j++) {
         uint64_t pmd_e = pmd[j];
@@ -594,7 +588,7 @@ void vmm_destroy_pgd(uint64_t *pgd) {
         if (!PTE_IS_TABLE(pmd_e))
           continue; /* private 2MB block: not user (user maps 4KB only) */
 
-        uint64_t *pt = (uint64_t *)(pmd_e & PTE_ADDR_MASK);
+        uint64_t *pt = (uint64_t *)phys_to_virt(pmd_e & PTE_ADDR_MASK);
         for (int k = 0; k < 512; k++) {
           uint64_t pte = pt[k];
           if ((pte & PTE_VALID) && (pte & PTE_USER)) {

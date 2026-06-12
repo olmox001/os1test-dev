@@ -79,7 +79,7 @@
  *          when alloc==0.
  *
  * Fast path (table entry already a table descriptor):
- *   entry & PTE_VALID && entry & 0x2 → return (uint64_t *)(entry & PTE_ADDR_MASK).
+ *   entry & PTE_VALID && entry & 0x2 → return (uint64_t *)phys_to_virt(entry & PTE_ADDR_MASK).
  *
  * Block-split path (entry valid but bit 1 == 0, i.e. a block descriptor):
  *   Called when arch_vmm_map needs to place a 4KB page inside an existing
@@ -162,7 +162,7 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc, int 
       arch_mb(); /* DSB: ensure sub-table is visible before parent entry update */
 
       /* Update the parent table to point to the new sub-table (table descriptor). */
-      table[index] = (uint64_t)new_table | PTE_TABLE | PTE_VALID;
+      table[index] = virt_to_phys(new_table) | PTE_TABLE | PTE_VALID;
       arch_cache_clean_range(&table[index], 8); /* write back parent entry */
       arch_mb();
 
@@ -174,7 +174,7 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc, int 
       return new_table;
     }
     /* Existing table descriptor: extract next-level table pointer from OA field. */
-    return (uint64_t *)(entry & PTE_ADDR_MASK);
+    return (uint64_t *)phys_to_virt(entry & PTE_ADDR_MASK);
   }
 
   /* Entry is absent (not valid); allocate a new table page if permitted. */
@@ -188,7 +188,7 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc, int 
   arch_mb();
 
   /* Install the new table as a table descriptor (PTE_TABLE | PTE_VALID). */
-  table[index] = (uint64_t)page | PTE_TABLE | PTE_VALID;
+  table[index] = virt_to_phys(page) | PTE_TABLE | PTE_VALID;
 
   arch_cache_clean_range(&table[index], 8);
   arch_mb();
@@ -226,7 +226,7 @@ static uint64_t *get_next_table(uint64_t *table, uint64_t index, int alloc, int 
  *   inner-shareable domain by hardware (AMMU-08 resolved — no IPI needed).
  */
 int arch_vmm_map(uint64_t pgd_addr, uint64_t va, uint64_t pa, uint64_t flags) {
-  uint64_t *pgd = (uint64_t *)pgd_addr;
+  uint64_t *pgd = (uint64_t *)phys_to_virt(pgd_addr);
   uint64_t *pud, *pmd, *pt;
 
   pud = get_next_table(pgd, PGD_INDEX(va), 1, 1); /* L0 → L1 */
@@ -280,7 +280,7 @@ int arch_vmm_map(uint64_t pgd_addr, uint64_t va, uint64_t pa, uint64_t flags) {
  * sibling CPU still translates 'va' through the cleared entry.
  */
 int arch_vmm_unmap(uint64_t pgd_addr, uint64_t va) {
-  uint64_t *pgd = (uint64_t *)pgd_addr;
+  uint64_t *pgd = (uint64_t *)phys_to_virt(pgd_addr);
   uint64_t *pud, *pmd, *pt;
 
   pud = get_next_table(pgd, PGD_INDEX(va), 0, 1); /* no alloc */
@@ -329,7 +329,7 @@ int arch_vmm_unmap(uint64_t pgd_addr, uint64_t va) {
  * after the loop — cross-CPU by hardware, no IPI needed.
  */
 int arch_vmm_protect(uint64_t pgd_addr, uint64_t va, uint64_t size, uint64_t flags) {
-  uint64_t *pgd = (uint64_t *)pgd_addr;
+  uint64_t *pgd = (uint64_t *)phys_to_virt(pgd_addr);
   uint64_t v = va & ~0xFFFUL;
   uint64_t end = (va + size + 0xFFFUL) & ~0xFFFUL;
   int rc = 0;
@@ -337,7 +337,7 @@ int arch_vmm_protect(uint64_t pgd_addr, uint64_t va, uint64_t size, uint64_t fla
   for (; v < end; v += 4096) {
     uint64_t pgde = pgd[PGD_INDEX(v)];
     if (!(pgde & PTE_VALID)) { rc = -1; break; }
-    uint64_t *pud = (uint64_t *)(pgde & PTE_ADDR_MASK); /* L0: always a table */
+    uint64_t *pud = (uint64_t *)phys_to_virt(pgde & PTE_ADDR_MASK); /* L0: always a table */
 
     uint64_t pude = pud[PUD_INDEX(v)];
     if (!(pude & PTE_VALID)) { rc = -1; break; }
@@ -346,7 +346,7 @@ int arch_vmm_protect(uint64_t pgd_addr, uint64_t va, uint64_t size, uint64_t fla
       pmd = get_next_table(pud, PUD_INDEX(v), 1, 2); /* split 1GB block */
       if (!pmd) { rc = -1; break; }
     } else {
-      pmd = (uint64_t *)(pude & PTE_ADDR_MASK);
+      pmd = (uint64_t *)phys_to_virt(pude & PTE_ADDR_MASK);
     }
 
     uint64_t pmde = pmd[PMD_INDEX(v)];
@@ -356,7 +356,7 @@ int arch_vmm_protect(uint64_t pgd_addr, uint64_t va, uint64_t size, uint64_t fla
       pt = get_next_table(pmd, PMD_INDEX(v), 1, 3); /* split 2MB block */
       if (!pt) { rc = -1; break; }
     } else {
-      pt = (uint64_t *)(pmde & PTE_ADDR_MASK);
+      pt = (uint64_t *)phys_to_virt(pmde & PTE_ADDR_MASK);
     }
 
     uint64_t *pte = &pt[PT_INDEX(v)];
@@ -393,23 +393,23 @@ int arch_vmm_protect(uint64_t pgd_addr, uint64_t va, uint64_t size, uint64_t fla
  * blocks), so lookups inside the 2MB-block RAM identity map always failed.
  */
 uint64_t arch_vmm_get_physical(uint64_t pgd_addr, uint64_t va) {
-  uint64_t *pgd = (uint64_t *)pgd_addr;
+  uint64_t *pgd = (uint64_t *)phys_to_virt(pgd_addr);
 
   uint64_t pgde = pgd[PGD_INDEX(va)];
   if (!(pgde & PTE_VALID)) return 0;
-  uint64_t *pud = (uint64_t *)(pgde & PTE_ADDR_MASK); /* L0: always a table */
+  uint64_t *pud = (uint64_t *)phys_to_virt(pgde & PTE_ADDR_MASK); /* L0: always a table */
 
   uint64_t pude = pud[PUD_INDEX(va)];
   if (!(pude & PTE_VALID)) return 0;
   if (!(pude & 0x2)) /* 1GB L1 block */
     return ((pude & PTE_ADDR_MASK) & ~0x3FFFFFFFUL) | (va & 0x3FFFFFFFUL);
-  uint64_t *pmd = (uint64_t *)(pude & PTE_ADDR_MASK);
+  uint64_t *pmd = (uint64_t *)phys_to_virt(pude & PTE_ADDR_MASK);
 
   uint64_t pmde = pmd[PMD_INDEX(va)];
   if (!(pmde & PTE_VALID)) return 0;
   if (!(pmde & 0x2)) /* 2MB L2 block */
     return ((pmde & PTE_ADDR_MASK) & ~0x1FFFFFUL) | (va & 0x1FFFFFUL);
-  uint64_t *pt = (uint64_t *)(pmde & PTE_ADDR_MASK);
+  uint64_t *pt = (uint64_t *)phys_to_virt(pmde & PTE_ADDR_MASK);
 
   uint64_t entry = pt[PT_INDEX(va)];
   if (!(entry & PTE_VALID)) return 0;
@@ -460,7 +460,7 @@ int arch_vmm_map_range(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t size, ui
     /* 2MB block optimisation: use an L2 block descriptor when both VA and PA
      * are 2MB-aligned and at least 2MB remains unmapped. */
     if ((v & 0x1FFFFF) == 0 && (p & 0x1FFFFF) == 0 && remaining >= 0x200000) {
-      uint64_t *pgd_ptr = (uint64_t *)pgd;
+      uint64_t *pgd_ptr = (uint64_t *)phys_to_virt(pgd);
       uint64_t *pud = get_next_table(pgd_ptr, PGD_INDEX(v), 1, 1);
       if (!pud) return -1;
 
@@ -537,7 +537,7 @@ uint64_t arch_vmm_create_process_pgd(void) {
    *   PUD[0]: MMIO region (0x0000_0000 .. 0x4000_0000, 1GB).
    *   PUD[1]: Kernel RAM identity map (0x4000_0000 .. 0x8000_0000, 1GB).
    * PUD[2..511] (user VA from 0x80000000 upward) are left at zero (private). */
-  uint64_t *src_pud = (uint64_t *)(kernel_pgd[0] & PTE_ADDR_MASK);
+  uint64_t *src_pud = (uint64_t *)phys_to_virt(kernel_pgd[0] & PTE_ADDR_MASK);
   if (src_pud && (kernel_pgd[0] & 0x2)) { /* verify kernel_pgd[0] is a table descriptor */
     uint64_t *dst_pud = (uint64_t *)pmm_alloc_page();
     if (dst_pud) {
@@ -554,7 +554,7 @@ uint64_t arch_vmm_create_process_pgd(void) {
        * any teardown freeing it would free a live frame of another process. */
       if (src_pud[1] & PTE_VALID) {
         if (PTE_IS_TABLE(src_pud[1])) {
-          uint64_t *src_pmd = (uint64_t *)(src_pud[1] & PTE_ADDR_MASK);
+          uint64_t *src_pmd = (uint64_t *)phys_to_virt(src_pud[1] & PTE_ADDR_MASK);
           uint64_t *dst_pmd = (uint64_t *)pmm_alloc_page();
           if (!dst_pmd) {
             pmm_free_page(dst_pud);
