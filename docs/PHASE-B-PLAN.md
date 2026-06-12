@@ -206,16 +206,33 @@ sandboxing (USR-SEC-03 #79 — epic-level outcome).
 ### B4 — Epic #94: amd64 parity (ACPI-MADT CPU count ARCH-01, real
 PCI/ACPI init ARCH-02, FPU/XMM save on context switch CPU-AMD64-01,
 IST-NMI paranoid entry, remove int 0x80 surface SYS-AMD64-03).
+Related: MM-PMM-08 #117 (PCI-hole RAM accounting — generic mm fix,
+can land ahead of B4).
 
 ### B5 — Epic #95: services/HAL + Plan 9 namespace (compositor→sched
 decoupling SCHED-01/GFX-COMP-03 #69, init.cfg actually read USR-INIT-02,
 service supervision rate-limit USR-INIT-03, HAL unification).
+Related maintainer reports: GFX-COMP-04 #118 (damage/redraw),
+USR-NOTIFY-01 #119 (notification popups + kernel-log bridge),
+GFX-DYN-01 #121 (dynamic resolution / resize / font alpha / stb images).
 
 ### B6 — Epic #96: SMP/races sweep + leftovers: async block I/O
 (DRV-VIRTIO-08 — busy-wait now runs with IRQs masked under the blk lock;
 correct but throughput-hostile), blocking `wait()` + exit status
 (needs SCHED-06 parent/child), IPC lost-wakeup IPC-01, kernel_ipc_send
 AB-BA chain SCHED-05, legacy virtio-pci transport (addendum 11 §2.5).
+
+### Maintainer-reported issues (2026-06-12) — slotting
+
+Five reports filed after live use of the higher-half build:
+
+| Issue | What | Slot |
+|---|---|---|
+| **#117** MM-PMM-08 | `-m 5G` ⇒ "6144 MB": total RAM from highest region END; the 3–4 GB amd64 PCI hole is **counted and allocatable as RAM** (not just a log error) | mm fix, land ASAP (pre-B4; related #20, epic #94) |
+| **#118** GFX-COMP-04 | windows only repaint under the mouse; **dead processes' windows linger** until hovered (damage not fed by programmatic updates / destroy) | B5 (graphics); bugfix can land earlier |
+| **#119** USR-NOTIFY-01 | notification popup never appears; kernel/user warnings+errors should surface as notifications (needs a log→notify bridge) | B5 (services; related #76, #81) |
+| **#120** EPIC userland | layered "onion" userland per ASTRA: custom posix-like kernel ABI → POSIX-as-user-services → conformant libc; GDK-like layered 2D toolkit; OpenGL/Mesa-like 3D; busybox philosophy (standards, no reinvention) | new epic, after/with B5 (needs fd table #90) |
+| **#121** GFX-DYN-01 | no hardcoded resolution/values anywhere; virtio-gpu auto resolution (#54, #49); desktop/window resize; font alpha/scaling; stb image formats | B5 (graphics+drivers, under epic #120 umbrella) |
 
 ---
 
