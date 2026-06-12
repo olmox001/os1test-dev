@@ -632,9 +632,11 @@ void arch_vmm_init_hw(uint64_t kernel_pgd) {
  * PGD and each process PGD (via arch_vmm_create_process_pgd -> arch_vmm_map_mmio).
  */
 void arch_vmm_map_mmio(uint64_t *pgd) {
-  /* Identity Map MMIO (UART, GIC, VirtIO) */
-  /* 0x08000000 to 0x0A800000 covers typical QEMU virt devices */
-  arch_vmm_map_range((uint64_t)pgd, 0x08000000UL, 0x08000000UL,
+  /* Map MMIO (UART, GIC, VirtIO) at its direct-map VA (phys_to_virt;
+   * identity while KERNEL_VIRT_BASE == 0).
+   * 0x08000000 to 0x0A800000 covers typical QEMU virt devices. */
+  arch_vmm_map_range(virt_to_phys(pgd),
+                     (uint64_t)phys_to_virt(0x08000000UL), 0x08000000UL,
                      0x02800000UL, PAGE_DEVICE);
 }
 
@@ -670,11 +672,11 @@ void arch_vmm_map_mmio(uint64_t *pgd) {
  */
 void arch_cpu_switch_context(struct process *next) {
     extern uint64_t *kernel_pgd;
-    /* kernel_pgd is identity-mapped (virt == phys), so its pointer value IS the
-     * physical TTBR0 base; next->page_table is likewise passed as a PA, matching
-     * the existing arch_vmm_set_pgd callers in this file. */
-    uint64_t pgd = next->page_table ? (uint64_t)next->page_table
-                                    : (uint64_t)(uintptr_t)kernel_pgd;
+    /* page_table / kernel_pgd are kernel virtual pointers; TTBR0 takes the
+     * PHYSICAL table base — translate with virt_to_phys (identity while
+     * KERNEL_VIRT_BASE == 0). */
+    uint64_t pgd = next->page_table ? virt_to_phys(next->page_table)
+                                    : (kernel_pgd ? virt_to_phys(kernel_pgd) : 0);
     if (pgd) {
         arch_vmm_set_pgd(pgd);
         arch_tlb_flush_all();

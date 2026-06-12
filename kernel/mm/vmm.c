@@ -16,14 +16,13 @@
  *   2. MMU lifecycle (vmm_init -> vmm_dynamic_remap) and per-process PGD
  *      management (vmm_create_pgd / vmm_destroy_pgd).
  *
- * Central invariant (IDENTITY MAP):
- *   The kernel runs identity-mapped (VA == PA for the RAM window).
- *   phys_to_virt() and virt_to_phys() in vmm.h are identity casts.
- *   get_next_table() casts a PTE physical address directly to a pointer;
- *   vmm_map/vmm_init use pmm_alloc_page() results directly as pointers.
- *   This model works under QEMU -kernel but contradicts the higher-half map
- *   described in the vmm.h comment block.  See MM-VMM-02 and S.4 of the
- *   subsystem analysis.
+ * PA/VA contract (kernel/memlayout.h):
+ *   In this file `uint64_t *pgd` parameters and pmm_alloc_page() results
+ *   are kernel VIRTUAL pointers; the arch_vmm_* layer takes the PGD as a
+ *   PHYSICAL address, so every delegation below converts with
+ *   virt_to_phys().  PTE output addresses are physical and are converted
+ *   with phys_to_virt() before being dereferenced (get_next_table) or
+ *   freed (vmm_destroy_pgd).  Identity while KERNEL_VIRT_BASE == 0.
  *
  * Known issues:
  *   MM-VMM-01  (FIXED)           W^X enforced via vmm_map_ram_wx(): kernel
@@ -171,10 +170,8 @@ int vmm_map_page(uint64_t *pgd, uint64_t virt, uint64_t phys, uint64_t flags) {
     return -1;
   }
 
-  /* Extract existing mapping for warning if necessary */
-  /* (Optional: we can keep the warning logic here if arch_vmm_map doesn't warn) */
-
-  return arch_vmm_map((uint64_t)pgd, virt, phys, flags);
+  /* arch_vmm_map takes the PGD as a physical address. */
+  return arch_vmm_map(virt_to_phys(pgd), virt, phys, flags);
 }
 
 /* Internal helper with locking */
@@ -261,7 +258,7 @@ int vmm_check_range(uint64_t *pgd, uint64_t virt, uint64_t size,
  * Returns the physical address, or 0 / arch-defined sentinel on unmapped VA.
  */
 uint64_t vmm_get_phys(uint64_t *pgd, uint64_t virt) {
-  return arch_vmm_get_physical((uint64_t)pgd, virt);
+  return arch_vmm_get_physical(virt_to_phys(pgd), virt);
 }
 
 /*
@@ -276,7 +273,7 @@ uint64_t vmm_get_phys(uint64_t *pgd, uint64_t virt) {
  * hardware; amd64 with a LAPIC IPI round (see arch/amd64/mm/tlb.c).
  */
 void vmm_unmap_page(uint64_t *pgd, uint64_t virt) {
-  arch_vmm_unmap((uint64_t)pgd, virt);
+  arch_vmm_unmap(virt_to_phys(pgd), virt);
 }
 
 /*
@@ -289,7 +286,7 @@ void vmm_unmap_page(uint64_t *pgd, uint64_t virt) {
  * the hole keep the new attributes).
  */
 int vmm_protect(uint64_t *pgd, uint64_t virt, uint64_t size, uint64_t flags) {
-  return arch_vmm_protect((uint64_t)pgd, virt, size, flags);
+  return arch_vmm_protect(virt_to_phys(pgd), virt, size, flags);
 }
 
 /* Internal helper with locking */
@@ -355,9 +352,13 @@ int vmm_map(uint64_t *pgd, uint64_t virt, uint64_t phys, uint64_t size,
  */
 void vmm_map_ram_wx(uint64_t *pgd, uint64_t base, uint64_t size) {
   extern char __kernel_start[], _etext[], __erodata[];
-  uint64_t tx_s = (uint64_t)__kernel_start & ~0xFFFUL;
-  uint64_t tx_e = ((uint64_t)_etext + 4095) & ~0xFFFUL;
-  uint64_t ro_e = ((uint64_t)__erodata + 4095) & ~0xFFFUL;
+  /* Section symbols are link (virtual) addresses; 'base'/'cur' iterate
+   * PHYSICAL addresses — compare in the physical domain and map each
+   * chunk at its direct-map VA (phys_to_virt; identity while
+   * KERNEL_VIRT_BASE == 0). */
+  uint64_t tx_s = virt_to_phys(__kernel_start) & ~0xFFFUL;
+  uint64_t tx_e = (virt_to_phys(_etext) + 4095) & ~0xFFFUL;
+  uint64_t ro_e = (virt_to_phys(__erodata) + 4095) & ~0xFFFUL;
   uint64_t end = base + size;
   uint64_t cur = base;
 
@@ -379,7 +380,8 @@ void vmm_map_ram_wx(uint64_t *pgd, uint64_t base, uint64_t size) {
     if (ro_e > cur && ro_e < next)
       next = ro_e;
 
-    arch_vmm_map_range((uint64_t)pgd, cur, cur, next - cur, flags);
+    arch_vmm_map_range(virt_to_phys(pgd), (uint64_t)phys_to_virt(cur), cur,
+                       next - cur, flags);
     cur = next;
   }
 }
@@ -505,10 +507,14 @@ void vmm_dynamic_remap(void) {
  * the upper-half (kernel) PGD entries from kernel_pgd by reference (not
  * deep-copied), and leaves the lower-half zero for user-space mappings.
  *
- * Returns: physical address of the new PGD (also usable as a pointer).
+ * Returns: kernel virtual pointer to the new PGD (the arch layer returns
+ * its physical address; converted here via phys_to_virt).
  */
 uint64_t *vmm_create_pgd(void) {
-  return (uint64_t *)arch_vmm_create_process_pgd();
+  uint64_t pgd_phys = arch_vmm_create_process_pgd();
+  if (!pgd_phys)
+    return NULL;
+  return (uint64_t *)phys_to_virt(pgd_phys);
 }
 
 /*
@@ -592,7 +598,9 @@ void vmm_destroy_pgd(uint64_t *pgd) {
         for (int k = 0; k < 512; k++) {
           uint64_t pte = pt[k];
           if ((pte & PTE_VALID) && (pte & PTE_USER)) {
-            pmm_free_page((void *)(pte & PTE_ADDR_MASK));
+            /* PTE carries the frame's PHYSICAL address; the PMM takes
+             * direct-map pointers. */
+            pmm_free_page(phys_to_virt(pte & PTE_ADDR_MASK));
             freed_frames++;
           }
         }

@@ -2,6 +2,7 @@
 #define _ARCH_AMD64_H
 
 #include <stdint.h>
+#include <kernel/memlayout.h>
 #include <kernel/types.h>
 
 /* AMD64 HAL Implementation Primitives */
@@ -60,8 +61,11 @@ static inline void arch_impl_wmb(void) { __asm__ __volatile__("sfence" ::: "memo
 
 static inline uint32_t arch_impl_get_cpu_id(void) {
   /* Use the actual LAPIC ID register for more accuracy than CPUID leaf 1.
-   * Assumes default base 0xFEE00000 is mapped (which it is in start.S). */
-  return (*(volatile uint32_t *)0xFEE00020UL) >> 24;
+   * 0xFEE00020 is the LAPIC-ID PHYSICAL address; access it through the
+   * direct map (KERNEL_VIRT_BASE offset — identity while it is 0).  The
+   * constant is open-coded instead of using phys_to_virt() to keep this
+   * header free of include cycles with memlayout.h users. */
+  return (*(volatile uint32_t *)(uintptr_t)(0xFEE00020UL + KERNEL_VIRT_BASE)) >> 24;
 }
 
 /* --- VMM / TLB --- */

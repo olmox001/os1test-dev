@@ -144,17 +144,18 @@ void arch_vmm_init_hw(uint64_t kernel_pgd) {
 
   for (size_t i = 0; i < count; i++) {
     if (regions[i].type == MEM_REGION_USABLE) {
-      pr_info("AMD64 VMM: Identity mapping RAM 0x%lx - 0x%lx\n",
+      pr_info("AMD64 VMM: Mapping RAM 0x%lx - 0x%lx\n",
               regions[i].base, regions[i].base + regions[i].size);
       /* W^X section split (AMMU-01 resolved): text RX, rodata RO+NX,
-       * the rest RW+NX. */
-      vmm_map_ram_wx((uint64_t *)kernel_pgd, regions[i].base,
+       * the rest RW+NX.  kernel_pgd is a PA here; vmm_map_ram_wx takes
+       * the pointer form. */
+      vmm_map_ram_wx((uint64_t *)phys_to_virt(kernel_pgd), regions[i].base,
                      regions[i].size);
     }
   }
 
-  /* Identity map MMIO regions (LAPIC, VirtIO, PCI) */
-  arch_vmm_map_mmio((uint64_t *)kernel_pgd);
+  /* Map MMIO regions (LAPIC, VirtIO, PCI) */
+  arch_vmm_map_mmio((uint64_t *)phys_to_virt(kernel_pgd));
 }
 
 /*
@@ -177,11 +178,13 @@ void arch_vmm_init_hw(uint64_t kernel_pgd) {
  * PTE flags: P|RW|PCD|PWT — cache-disabled, write-through for MMIO registers.
  */
 void arch_vmm_map_mmio(uint64_t *pgd) {
-  /* Identity Map PCI MMIO and System MMIO (0xFE000000 to 0xFFFFFFFF).
+  /* Map PCI MMIO and System MMIO (0xFE000000 to 0xFFFFFFFF) at their
+   * direct-map VAs (phys_to_virt; identity while KERNEL_VIRT_BASE == 0).
    * Covers PCI devices, LAPIC, IOAPIC, and upper BIOS ranges.
    * NOTE(AMMU-06): ~8192 individual 4KB map calls per PGD — inefficient. */
   for (uint64_t addr = 0xFE000000UL; addr < 0xFFFFFFFFUL; addr += 4096) {
-    arch_vmm_map((uint64_t)pgd, addr, addr, PAGE_DEVICE);
+    arch_vmm_map(virt_to_phys(pgd), (uint64_t)phys_to_virt(addr), addr,
+                 PAGE_DEVICE);
   }
 }
 
@@ -202,7 +205,8 @@ int arch_vmm_map_device(uint64_t base, uint64_t size) {
   uint64_t start = base & ~0xFFFUL;
   uint64_t end = (base + size + 0xFFFUL) & ~0xFFFUL;
   for (uint64_t a = start; a < end; a += 4096) {
-    arch_vmm_map((uint64_t)kernel_pgd, a, a, PAGE_DEVICE);
+    arch_vmm_map(virt_to_phys(kernel_pgd), (uint64_t)phys_to_virt(a), a,
+                 PAGE_DEVICE);
   }
   arch_tlb_flush_all();
   return 0;
@@ -404,15 +408,15 @@ int arch_vmm_unmap(uint64_t pgd, uint64_t va) {
 
   if (!(pml4[PML4_INDEX(va)] & X86_PTE_P))
     return 0;
-  uint64_t *pdpt = (uint64_t *)(pml4[PML4_INDEX(va)] & PTE_ADDR_MASK);
+  uint64_t *pdpt = (uint64_t *)phys_to_virt(pml4[PML4_INDEX(va)] & PTE_ADDR_MASK);
 
   if (!(pdpt[PDPT_INDEX(va)] & X86_PTE_P))
     return 0;
-  uint64_t *pd = (uint64_t *)(pdpt[PDPT_INDEX(va)] & PTE_ADDR_MASK);
+  uint64_t *pd = (uint64_t *)phys_to_virt(pdpt[PDPT_INDEX(va)] & PTE_ADDR_MASK);
 
   if (!(pd[PD_INDEX(va)] & X86_PTE_P))
     return 0;
-  uint64_t *pt = (uint64_t *)(pd[PD_INDEX(va)] & PTE_ADDR_MASK);
+  uint64_t *pt = (uint64_t *)phys_to_virt(pd[PD_INDEX(va)] & PTE_ADDR_MASK);
 
   pt[PT_INDEX(va)] = 0;
   amd64_tlb_shootdown_va(va); /* local invlpg + IPI to online peers */
@@ -436,7 +440,7 @@ uint64_t arch_vmm_get_physical(uint64_t pgd, uint64_t va) {
 
   if (!(pml4[PML4_INDEX(va)] & X86_PTE_P))
     return 0;
-  uint64_t *pdpt = (uint64_t *)(pml4[PML4_INDEX(va)] & PTE_ADDR_MASK);
+  uint64_t *pdpt = (uint64_t *)phys_to_virt(pml4[PML4_INDEX(va)] & PTE_ADDR_MASK);
 
   uint64_t pdpte = pdpt[PDPT_INDEX(va)];
   if (!(pdpte & X86_PTE_P))
@@ -483,11 +487,10 @@ uint64_t arch_vmm_create_process_pgd(void);
  * Returns the physical address of the new PML4, or 0 on allocation failure.
  */
 uint64_t arch_vmm_create_process_pgd(void) {
-  uint64_t new_pml4_phys = (uint64_t)pmm_alloc_page();
-  if (!new_pml4_phys)
+  uint64_t *new_pml4 = (uint64_t *)pmm_alloc_page();
+  if (!new_pml4)
     return 0;
 
-  uint64_t *new_pml4 = (uint64_t *)new_pml4_phys;
   memset(new_pml4, 0, PAGE_SIZE);
 
   /* 
@@ -509,16 +512,15 @@ uint64_t arch_vmm_create_process_pgd(void) {
    * We must allocate a private PDPT for the new process and only copy the 
    * kernel-specific identity mappings into it.
    */
-  uint64_t new_pdpt_phys = (uint64_t)pmm_alloc_page();
-  if (!new_pdpt_phys) {
-    pmm_free_page((void *)new_pml4_phys);
+  uint64_t *new_pdpt = (uint64_t *)pmm_alloc_page();
+  if (!new_pdpt) {
+    pmm_free_page(new_pml4);
     return 0;
   }
-  uint64_t *new_pdpt = (uint64_t *)new_pdpt_phys;
   memset(new_pdpt, 0, PAGE_SIZE);
-  
-  /* Link new PDPT to index 0 of PML4 */
-  new_pml4[0] = new_pdpt_phys | X86_PTE_P | X86_PTE_RW | X86_PTE_US;
+
+  /* Link new PDPT to index 0 of PML4 (entries hold PHYSICAL addresses) */
+  new_pml4[0] = virt_to_phys(new_pdpt) | X86_PTE_P | X86_PTE_RW | X86_PTE_US;
 
   /* 3. Clone ONLY the essential part of the identity map (0-1GB).
    * This covers the kernel (at 1MB) and boot structures.
@@ -551,7 +553,8 @@ uint64_t arch_vmm_create_process_pgd(void) {
    */
   arch_vmm_map_mmio(new_pml4);
 
-  return new_pml4_phys;
+  /* Contract: return the PGD's PHYSICAL address (vmm_create_pgd converts). */
+  return virt_to_phys(new_pml4);
 }
 
 /* AMMU-03 resolved: the divergent arch teardown (which freed only the PML4

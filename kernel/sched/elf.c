@@ -102,15 +102,16 @@ int process_load_elf(struct process *proc, const char *path) {
           return -1;
         }
 
-        /* Map page in process address space */
-        if (vmm_map_page(proc->page_table, vaddr, (uint64_t)paddr, flags) !=
-            0) {
+        /* Map page in process address space (PTE wants the frame's
+         * PHYSICAL address; pmm returned the kernel pointer). */
+        if (vmm_map_page(proc->page_table, vaddr, virt_to_phys(paddr),
+                         flags) != 0) {
           pr_err("ELF: Failed to map page at 0x%lx\n", vaddr);
           pmm_free_page(paddr);
           return -1;
         }
 
-        /* Get Kernel Virtual Address for writing (Use Identity Map) */
+        /* Kernel virtual address for writing (direct-map pointer) */
         void *kaddr = paddr;
 
         /* Zero the page content */
@@ -156,7 +157,7 @@ int process_load_elf(struct process *proc, const char *path) {
       return -1;
     }
     /* PAGE_USER_DATA: the user stack is never executable (W^X, ELF-02). */
-    if (vmm_map_page(proc->page_table, vaddr, (uint64_t)paddr,
+    if (vmm_map_page(proc->page_table, vaddr, virt_to_phys(paddr),
                      PAGE_USER_DATA) != 0) {
       pr_err("%s", "ELF: Failed to map stack page\n");
       pmm_free_page(paddr);

@@ -31,6 +31,7 @@
 #include <kernel/fdt.h>
 #include <kernel/arch.h>
 #include <kernel/cpu.h>
+#include <kernel/memlayout.h>
 #include <kernel/pmm.h>
 #include <kernel/platform.h>
 #include <kernel/printk.h>
@@ -155,7 +156,9 @@ struct mem_region *arch_platform_get_mem_regions(size_t *count) {
             /* Issue the probe load; if addr is unmapped, a Data Abort fires.
              * sync_handler sets probe_failed=true and increments ELR_EL1 by 4
              * to skip this instruction, then returns to the instruction below. */
-            volatile uint64_t *ptr = (volatile uint64_t *)addr;
+            /* 'addr' is a PHYSICAL address; probe through its direct-map
+             * VA (identity while KERNEL_VIRT_BASE == 0). */
+            volatile uint64_t *ptr = (volatile uint64_t *)phys_to_virt(addr);
             (void)*ptr;
 
             arch_mb(); /* DSB: ensure probe_failed is current after handler runs */

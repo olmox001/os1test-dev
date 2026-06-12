@@ -563,7 +563,7 @@ uint64_t arch_vmm_create_process_pgd(void) {
           }
           memcpy(dst_pmd, src_pmd, 4096);
           arch_cache_clean_range(dst_pmd, 4096);
-          dst_pud[1] = (uint64_t)dst_pmd | (src_pud[1] & ~PTE_ADDR_MASK);
+          dst_pud[1] = virt_to_phys(dst_pmd) | (src_pud[1] & ~PTE_ADDR_MASK);
         } else {
           /* 1GB block: copied by value; a future split allocates private
            * tables because it rewrites this private PUD entry. */
@@ -572,11 +572,13 @@ uint64_t arch_vmm_create_process_pgd(void) {
       }
       arch_cache_clean_range(dst_pud, 4096);
       /* Install new PUD as table descriptor; preserve attribute bits from kernel_pgd[0]. */
-      pgd[0] = (uint64_t)dst_pud | (kernel_pgd[0] & ~PTE_ADDR_MASK);
+      pgd[0] = virt_to_phys(dst_pud) | (kernel_pgd[0] & ~PTE_ADDR_MASK);
     }
   }
 
   arch_cache_clean_range(pgd, 4096);
   arch_mb();
-  return (uint64_t)pgd;
+  /* Contract: the arch layer returns the PGD's PHYSICAL address;
+   * vmm_create_pgd() converts back to a pointer. */
+  return virt_to_phys(pgd);
 }

@@ -6,20 +6,15 @@
  * AArch64 and AMD64.  The constants are mutually exclusive between arches
  * via the ARCH_AARCH64 / ARCH_AMD64 preprocessor guards.
  *
- * Central invariant (IDENTITY MAP):
- *   phys_to_virt() and virt_to_phys() below are identity casts -- they return
- *   their argument unchanged.  This correctly models the current runtime where
- *   kernel VA == PA for the RAM window.
+ * Central invariant (DIRECT MAP, see kernel/memlayout.h):
+ *   phys_to_virt()/virt_to_phys() are a single-offset translation
+ *   (KERNEL_VIRT_BASE; 0 == identity while the higher-half flip is staged).
  *
- *   MM-VMM-02 (walker half, resolved Phase B2): every page-table walker
- *   (kernel/mm/vmm.c and both arch mmu.c) now routes PTE-physical-address
- *   dereferences through phys_to_virt() and stores entries via
- *   virt_to_phys(), so the identity assumption lives HERE and nowhere else
- *   in the walk paths.  The remaining identity dependencies (PMM metadata
- *   pointers MM-PMM-07, pmm_alloc return values used as pointers, MMIO,
- *   kernel link address) are the higher-half migration proper — a dedicated
- *   future change that starts by making these two functions real
- *   translations.
+ *   MM-VMM-02 + MM-PMM-07 (contract sweep, Phase B2): every PA-to-pointer
+ *   crossing in the tree goes through that pair — page-table walkers,
+ *   PMM returns/frees, process PGD loads (TTBR0/CR3), user-frame maps,
+ *   virtio DMA addresses, MMIO accessors.  Flipping KERNEL_VIRT_BASE plus
+ *   the boot/linker changes is all that remains for the higher half.
  *
  * Known issues (see docs/review/analysis/01-mm-memory-management.md):
  *   MM-VMM-01 through MM-VMM-07.
@@ -27,6 +22,7 @@
 #ifndef _KERNEL_VMM_H
 #define _KERNEL_VMM_H
 
+#include <kernel/memlayout.h>
 #include <kernel/pmm.h>
 #include <kernel/types.h>
 
@@ -35,11 +31,11 @@
  * 0x0000_0000_0000_0000 - 0x0000_FFFF_FFFF_FFFF : User Space (256 TB)
  * 0xFFFF_0000_0000_0000 - 0xFFFF_FFFF_FFFF_FFFF : Kernel Space (256 TB)
  *
- * NOTE(MM-VMM-02): This higher-half layout is the INTENDED future design.
- * The kernel currently runs IDENTITY-MAPPED (kernel VA == PA), so the
- * 0xFFFF_... kernel-space range is NOT used today.  phys_to_virt() and
- * virt_to_phys() are identity casts, not the offset translations that a
- * real higher-half split would require.
+ * NOTE(MM-VMM-02): This higher-half layout is the target design.  The
+ * kernel still runs identity-mapped (KERNEL_VIRT_BASE == 0 in
+ * memlayout.h), but every PA-to-pointer crossing already goes through
+ * phys_to_virt()/virt_to_phys(), so the flip is confined to memlayout.h
+ * plus the per-arch boot/linker changes.
  */
 
 /* PTE flag constants -- selected by arch at compile time. */
@@ -167,17 +163,9 @@ typedef uint64_t pte_t;
  * gpa_t = guest/kernel physical address
  * pte_t = raw page table entry value */
 
-/* Address Translation */
-/*
- * Address Translation helpers.
- *
- * NOTE(MM-VMM-02): Both functions are identity casts; they return their
- * argument unchanged.  This is correct only under the identity-map invariant
- * (kernel VA == PA).  They do NOT implement a higher-half offset.  Any future
- * shift to a non-identity map must replace these with real translations.
- */
-static inline void *phys_to_virt(uint64_t phys) { return (void *)phys; }
-static inline uint64_t virt_to_phys(void *virt) { return (uint64_t)virt; }
+/* Address Translation: phys_to_virt()/virt_to_phys() live in
+ * kernel/memlayout.h (single KERNEL_VIRT_BASE offset, identity while the
+ * offset is 0).  Included above so all existing users keep compiling. */
 
 /* vmm_create_pgd: allocate a new process PGD with kernel half pre-filled. */
 uint64_t *vmm_create_pgd(void);

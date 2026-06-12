@@ -1324,7 +1324,7 @@ long sys_sbrk(intptr_t increment) {
       }
       memset(paddr, 0, 4096);
       /* PAGE_USER_DATA: the user heap is never executable (W^X, ELF-02). */
-      if (vmm_map_page_locked(proc, vaddr, (uint64_t)paddr, PAGE_USER_DATA) != 0) {
+      if (vmm_map_page_locked(proc, vaddr, virt_to_phys(paddr), PAGE_USER_DATA) != 0) {
         pmm_free_page(paddr);
         return -1;
       }
@@ -1342,7 +1342,7 @@ long sys_sbrk(intptr_t increment) {
       uint64_t paddr = vmm_get_phys(proc->page_table, vaddr);
       if (paddr) {
         vmm_unmap_page_locked(proc, vaddr);
-        pmm_free_page((void *)paddr);
+        pmm_free_page(phys_to_virt(paddr));
       }
     }
   }
