@@ -246,9 +246,11 @@ int arch_vmm_map(uint64_t pgd_addr, uint64_t va, uint64_t pa, uint64_t flags) {
   arch_cache_clean_range(pt_entry, 8); /* flush PT entry to PoC for page walker */
   arch_mb(); /* DSB ISH: ensure entry visible to all observers before TLB op */
 
-  /* Flush TLB for this VA only if this PGD is currently loaded in TTBR0_EL1.
-   * The TLBI is the broadcast (IS) variant: siblings are covered too. */
-  if (pgd_addr == arch_impl_get_pgd()) {
+  /* Flush TLB for this VA only if this PGD is currently live — in TTBR0
+   * (a process half) or TTBR1 (the kernel half).  The TLBI is the
+   * broadcast (IS) variant: siblings are covered too. */
+  if (pgd_addr == arch_impl_get_pgd() ||
+      pgd_addr == arch_impl_get_kernel_pgd()) {
     arch_tlb_flush_va(va);
     arch_mb();
     arch_isb();
@@ -488,93 +490,22 @@ int arch_vmm_map_range(uint64_t pgd, uint64_t va, uint64_t pa, uint64_t size, ui
   return 0;
 }
 /*
- * arch_vmm_create_process_pgd - allocate and populate a new per-process PGD.
+ * arch_vmm_create_process_pgd - allocate a new per-process (TTBR0) PGD.
  *
  * Returns: physical address of the new L0 page table, or 0 on PMM exhaustion.
  *
- * A process PGD is constructed by:
- *   1. Allocating a fresh, zeroed 4KB page as the L0 table.
- *   2. Copying kernel mappings (PGD entries 256..511, the "upper half"):
- *      In a 48-bit VA layout with T0SZ=16, the kernel lives above
- *      0x0000_8000_0000_0000 (bit 47 set), which maps to PGD indices 256–511.
- *      These entries are shared (not copied by value of the sub-tables; the same
- *      L1 table pointers are placed in the new PGD), so all processes share the
- *      kernel virtual mapping.
- *   3. Cloning the lower-half identity map (PGD index 0):
- *      The kernel's L0[0] points to a PUD covering the low 512GB (0..511 GB).
- *      To avoid sharing the user-space portion of that PUD, a new PUD is
- *      allocated and only entries 0 and 1 (covering 0..2GB: MMIO at 0..1GB,
- *      kernel RAM identity-map at 1..2GB) are copied from the kernel PUD.
- *      PUD index 2 and above (covering 2GB..512GB, the user VA region starting
- *      at 0x80000000) are left as zero, so each process gets its own private
- *      user address space.
- *
- * After this function returns, user-space mappings are installed into the new
- * PGD via arch_vmm_map() / arch_vmm_map_range() with the process's own PGD addr.
- *
- * NOTE: The upper-half kernel PGD entries (256..511) are copied by value, meaning
- * each process's L0 table directly points to the same L1 tables as kernel_pgd.
- * Any new kernel L1/L2/L3 entries added after process creation will automatically
- * be visible to all processes (desired behaviour for kernel mappings).
+ * Higher-half model: the kernel lives entirely in TTBR1 (image, direct map
+ * and MMIO at KERNEL_VIRT_BASE + PA — see memlayout.h), which the hardware
+ * uses for every VA whose top bits are set.  A process PGD therefore
+ * contains ONLY user mappings: it starts out completely empty and the ELF
+ * loader / sbrk fill it via arch_vmm_map().  Nothing is shared with
+ * kernel_pgd, which makes vmm_destroy_pgd's ownership rules trivial — every
+ * table page reachable from this PGD belongs to the process.
  */
 uint64_t arch_vmm_create_process_pgd(void) {
   uint64_t *pgd = (uint64_t *)pmm_alloc_page();
   if (!pgd) return 0;
   memset(pgd, 0, 4096);
-
-  extern uint64_t *kernel_pgd;
-
-  /* Copy kernel mappings (upper half: PGD indices 256..511).
-   * PGD index i covers VA [i * 512GB .. (i+1) * 512GB).
-   * Indices 256..511 cover VA ≥ 0x8000_0000_0000 — the kernel virtual range. */
-  for (int i = 256; i < 512; i++) {
-    pgd[i] = kernel_pgd[i];
-  }
-
-  /* Clone kernel identity map (lower half, PGD index 0).
-   * kernel_pgd[0] is a table descriptor pointing to a PUD.
-   * We allocate a NEW PUD for the process and selectively copy only:
-   *   PUD[0]: MMIO region (0x0000_0000 .. 0x4000_0000, 1GB).
-   *   PUD[1]: Kernel RAM identity map (0x4000_0000 .. 0x8000_0000, 1GB).
-   * PUD[2..511] (user VA from 0x80000000 upward) are left at zero (private). */
-  uint64_t *src_pud = (uint64_t *)phys_to_virt(kernel_pgd[0] & PTE_ADDR_MASK);
-  if (src_pud && (kernel_pgd[0] & 0x2)) { /* verify kernel_pgd[0] is a table descriptor */
-    uint64_t *dst_pud = (uint64_t *)pmm_alloc_page();
-    if (dst_pud) {
-      memset(dst_pud, 0, 4096);
-      /* Clone the PUD entries for MMIO (0-1GB) and Kernel (1-2GB).
-       * User-space typically starts at 2GB (PUD index 2), so we leave it free. */
-      if (src_pud[0] & PTE_VALID) dst_pud[0] = src_pud[0]; /* MMIO 1GB block */
-      /* PUD[1] covers 1..2GB: kernel RAM identity AND the bottom of the user
-       * window (the ELF header page at 0x7ffff000 lands here).  If the kernel
-       * entry is a table, DEEP-COPY its PMD page: installing a user PTE (by
-       * splitting a kernel 2MB block) must happen in a process-private table.
-       * Sharing the kernel's PMD here let every process write the same split
-       * PT — all processes (and the kernel) aliased one 0x7ffff000 page, and
-       * any teardown freeing it would free a live frame of another process. */
-      if (src_pud[1] & PTE_VALID) {
-        if (PTE_IS_TABLE(src_pud[1])) {
-          uint64_t *src_pmd = (uint64_t *)phys_to_virt(src_pud[1] & PTE_ADDR_MASK);
-          uint64_t *dst_pmd = (uint64_t *)pmm_alloc_page();
-          if (!dst_pmd) {
-            pmm_free_page(dst_pud);
-            pmm_free_page(pgd);
-            return 0;
-          }
-          memcpy(dst_pmd, src_pmd, 4096);
-          arch_cache_clean_range(dst_pmd, 4096);
-          dst_pud[1] = virt_to_phys(dst_pmd) | (src_pud[1] & ~PTE_ADDR_MASK);
-        } else {
-          /* 1GB block: copied by value; a future split allocates private
-           * tables because it rewrites this private PUD entry. */
-          dst_pud[1] = src_pud[1];
-        }
-      }
-      arch_cache_clean_range(dst_pud, 4096);
-      /* Install new PUD as table descriptor; preserve attribute bits from kernel_pgd[0]. */
-      pgd[0] = virt_to_phys(dst_pud) | (kernel_pgd[0] & ~PTE_ADDR_MASK);
-    }
-  }
 
   arch_cache_clean_range(pgd, 4096);
   arch_mb();

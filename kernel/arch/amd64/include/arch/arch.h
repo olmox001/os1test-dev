@@ -79,6 +79,18 @@ static inline uint64_t arch_impl_get_pgd(void) {
   return pgd;
 }
 
+/* On amd64 the kernel half lives in the same PML4 (indices 256..511), so
+ * the "kernel root" accessors are simple aliases of the CR3 ones.  They
+ * exist so shared code can address the kernel address-space root without
+ * caring that aarch64 keeps it in a separate register (TTBR1). */
+static inline void arch_impl_set_kernel_pgd(uint64_t pgd) {
+  arch_impl_set_pgd(pgd);
+}
+
+static inline uint64_t arch_impl_get_kernel_pgd(void) {
+  return arch_impl_get_pgd();
+}
+
 static inline void arch_impl_tlb_flush_local(void) {
   uint64_t cr3;
   __asm__ __volatile__("mov %%cr3, %0\n\t"

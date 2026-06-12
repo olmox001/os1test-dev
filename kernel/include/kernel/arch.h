@@ -78,6 +78,13 @@ void arch_vmm_set_secondary_pgd(uint64_t pgd);
 static inline void arch_vmm_set_pgd(uint64_t pgd) { arch_impl_set_pgd(pgd); }
 static inline uint64_t arch_vmm_get_pgd(void) { return arch_impl_get_pgd(); }
 
+/* Kernel address-space root: TTBR1 on aarch64 (separate from the per-
+ * process TTBR0), CR3 alias on amd64 (kernel half shared via PML4 high
+ * entries).  Used by vmm_init/vmm_dynamic_remap when installing the
+ * kernel PGD. */
+static inline void arch_vmm_set_kernel_pgd(uint64_t pgd) { arch_impl_set_kernel_pgd(pgd); }
+static inline uint64_t arch_vmm_get_kernel_pgd(void) { return arch_impl_get_kernel_pgd(); }
+
 /* TLB and Cache Control */
 static inline void arch_tlb_flush_local(void) { arch_impl_tlb_flush_local(); }
 static inline void arch_tlb_flush_all(void) { arch_impl_tlb_flush_all(); }

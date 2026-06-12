@@ -239,9 +239,10 @@ extern void smp_create_idle_task(uint32_t cpu_id);
  * the emulator. [static, not verified on real hardware]
  */
 void arch_smp_init(void) {
-    /* Publish kernel PGD to secondary_ttbr0 before waking any secondary CPU.
-     * secondary_startup (start.S:159) reads this value to load TTBR0_EL1. */
-    uint64_t current_pgd = arch_vmm_get_pgd();
+    /* Publish the KERNEL PGD (TTBR1 root) before waking any secondary CPU.
+     * secondary_startup (start.S) reads secondary_ttbr1 and loads it into
+     * TTBR1_EL1; TTBR0 (user half) gets the boot identity tables. */
+    uint64_t current_pgd = arch_vmm_get_kernel_pgd();
     arch_vmm_set_secondary_pgd(current_pgd);
 
     /* Discover CPU count from FDT; fall back to a small sane cap if unavailable.

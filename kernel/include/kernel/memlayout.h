@@ -34,8 +34,11 @@
 #include <kernel/types.h>
 
 #ifdef ARCH_AARCH64
-/* Higher-half flip (Stage 2): 0xFFFF000000000000UL (TTBR1, T1SZ=16). */
-#define KERNEL_VIRT_BASE 0x0UL
+/* Higher half: TTBR1_EL1 range, T0SZ=T1SZ=16 (48-bit split).  The kernel
+ * image is linked at KERNEL_VIRT_BASE + 0x40080000 (its load PA) and all
+ * RAM/MMIO is direct-mapped at PA + KERNEL_VIRT_BASE via TTBR1; TTBR0 is
+ * user-only (per-process tables). */
+#define KERNEL_VIRT_BASE 0xFFFF000000000000UL
 #elif defined(ARCH_AMD64)
 /* Higher-half flip (Stage 3): 0xFFFF800000000000UL (PML4 index 256). */
 #define KERNEL_VIRT_BASE 0x0UL

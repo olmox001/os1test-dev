@@ -478,14 +478,16 @@ void vmm_dynamic_remap(void) {
   /* 2. Re-map MMIO */
   arch_vmm_map_mmio(new_pgd);
 
-  /* 3. Atomically switch to the new PGD */
+  /* 3. Atomically switch to the new PGD (kernel root: TTBR1 on aarch64,
+   * CR3 on amd64) */
   uint64_t new_phys = virt_to_phys(new_pgd);
-  
+
   /* Swap the global kernel_pgd */
   uint64_t *old_pgd = kernel_pgd;
   kernel_pgd = new_pgd;
-  
-  arch_vmm_set_pgd(new_phys);
+
+  arch_vmm_set_kernel_pgd(new_phys);
+  arch_tlb_flush_local();
   arch_mb();
   arch_isb();
 
