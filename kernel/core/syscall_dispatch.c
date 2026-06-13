@@ -822,9 +822,8 @@ extern void uart_puts(const char *str);
  *
  *   FD_WIN     window text sink (stdout): bounce-buffers the data (no
  *              truncation, capped at SYSCALL_MAX_IO_BYTES), echoes to the
- *              UART (serial mirror), and appends to the target window —
- *              resolved once at spawn (inherited from the parent's terminal,
- *              USR-TTY-01 #123) or by PID if still unset.
+ *              UART (serial mirror), and appends to the caller's OWN window
+ *              (resolved by PID; a child does not inherit the spawner's).
  *   FD_FILE    VFS write at the fd's private offset (bounce buffer, capped
  *              at SYSCALL_MAX_IO_BYTES); advances the offset and refreshes
  *              the cached node size.
@@ -850,9 +849,9 @@ long sys_write(int fd, const char *buf, size_t count) {
     return -EBADF;
 
   if (e->type == FD_WIN) {
-    /* stdout sink: win_id is resolved once at spawn (inherited from the
-     * parent's terminal, USR-TTY-01 #123) or, if still unset, to the
-     * caller's own window by PID. */
+    /* stdout sink: resolve to the caller's OWN compositor window by PID
+     * (win_id stays -1 from process_fd_init; a child does not inherit the
+     * spawner's terminal — see process_create). */
     int win_id = e->win_id;
     if (win_id < 0)
       win_id = compositor_get_window_by_pid(current_process->pid);
