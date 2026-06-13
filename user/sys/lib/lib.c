@@ -126,9 +126,8 @@ void compositor_render(void) { _sys_compositor_render(); }
 /* send/recv: IPC syscalls; pid==-1 means "any sender" in recv/try_recv. */
 int send(int pid, struct ipc_message *msg) { return _sys_send(pid, msg); }
 int recv(int pid, struct ipc_message *msg) { return _sys_recv(pid, msg); }
-/* try_recv: non-blocking variant of recv (syscall #32); returns <0 if no
- * message is waiting, 0 on success.  Forward-declared here because the arch
- * syscall.S may not have a .global for it in the dead user/sys/lib/syscall.S. */
+/* try_recv: non-blocking variant of recv (SYS_TRY_RECV); returns <0 if no
+ * message is waiting, 0 on success. */
 int try_recv(int pid, struct ipc_message *msg) { extern int _sys_try_recv(int pid, void *msg); return _sys_try_recv(pid, msg); }
 void set_window_flags(int win_id, int flags) { _sys_window_set_flags(win_id, flags); }
 void set_focus(int pid) { extern void _sys_set_focus(int pid); _sys_set_focus(pid); }
@@ -201,8 +200,9 @@ long lseek(int fd, long offset, int whence) { return _sys_lseek(fd, offset, when
  * printf: uses a 256-byte stack buffer; output longer than 255 chars is
  * silently truncated by vsnprintf.
  *
- * printf_win: like printf but writes to a compositor window's fd (win_id)
- * via _sys_write, which routes to the compositor terminal emulator.
+ * printf_win: like printf but writes to a specific compositor window by id
+ * via window_write() (the dedicated SYS_WINDOW_WRITE, #123) — no longer the
+ * fd>=100 overload on write().
  *
  * vsprintf/sprintf: pass 65536 as the size limit — effectively unbounded.
  * Callers are responsible for providing a large enough destination buffer;
@@ -213,7 +213,8 @@ long lseek(int fd, long offset, int whence) { return _sys_lseek(fd, offset, when
  */
 int vsprintf(char *out, const char *fmt, va_list args) { return vsnprintf(out, 65536, fmt, args); }
 int printf(const char *fmt, ...) { char buf[256]; va_list args; va_start(args, fmt); int res = vsnprintf(buf, sizeof(buf), fmt, args); va_end(args); write(1, buf, strlen(buf)); return res; }
-void printf_win(int win_id, const char *fmt, ...) { char buf[512]; va_list args; va_start(args, fmt); vsnprintf(buf, sizeof(buf), fmt, args); va_end(args); _sys_write(win_id, buf, strlen(buf)); }
+void window_write(int win_id, const char *buf, unsigned long count) { _sys_window_write(win_id, buf, count); }
+void printf_win(int win_id, const char *fmt, ...) { char buf[512]; va_list args; va_start(args, fmt); vsnprintf(buf, sizeof(buf), fmt, args); va_end(args); _sys_window_write(win_id, buf, strlen(buf)); }
 int sprintf(char *out, const char *fmt, ...) { va_list args; va_start(args, fmt); int res = vsnprintf(out, 65536, fmt, args); va_end(args); return res; }
 int snprintf(char *out, size_t size, const char *fmt, ...) { va_list args; va_start(args, fmt); int res = vsnprintf(out, size, fmt, args); va_end(args); return res; }
 void print(const char *s) { write(1, s, strlen(s)); }
@@ -480,8 +481,8 @@ int graphics_draw_text(int win_id, int x, int y, const char *text, uint32_t colo
 
   /* stb_easy_font returns quads, but the quad-to-pixel rendering loop is not
    * implemented.  Fall back to the compositor's built-in terminal font via
-   * _sys_write, losing x/y positioning and color control. */
-  _sys_write(win_id, text, strlen(text)); /* Uses compositor terminal emulator */
+   * window_write, losing x/y positioning and color control. */
+  _sys_window_write(win_id, text, strlen(text)); /* compositor terminal emulator */
   return strlen(text) * 8;
 }
 

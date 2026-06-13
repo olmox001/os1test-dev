@@ -187,6 +187,32 @@ static long dispatch_spawn(const char *path, uint8_t level, uint32_t caps,
   return ret;
 }
 
+/* window_text_write - copy a user text buffer into a kmalloc bounce (no
+ * truncation; capped at SYSCALL_MAX_IO_BYTES), mirror it to the UART serial
+ * log, and append it to compositor window win_id.  Shared by the FD_WIN
+ * stdout sink and SYS_WINDOW_WRITE (#123).  Replaces the old 1023-byte
+ * syscall_buf truncation (retires ABI-06 on the window path). */
+extern void uart_puts(const char *str);
+static long window_text_write(int win_id, const char *ubuf, size_t count) {
+  if (count == 0)
+    return 0;
+  if (count > SYSCALL_MAX_IO_BYTES)
+    return -EINVAL;
+  char *k = kmalloc(count + 1);
+  if (!k)
+    return -ENOMEM;
+  if (arch_copy_from_user(k, ubuf, count) != 0) {
+    kfree(k);
+    return -EFAULT;
+  }
+  k[count] = '\0';
+  uart_puts(k);
+  if (win_id > 0)
+    compositor_window_write(win_id, k, count);
+  kfree(k);
+  return (long)count;
+}
+
 struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
   uint64_t syscall_num = pt_regs_syscall_num(frame);
   uint64_t arg0 = pt_regs_arg(frame, 0);
@@ -356,6 +382,16 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
   case SYS_WINDOW_DRAW:
     compositor_draw_rect((int)arg0, (int)arg1, (int)arg2, (int)arg3, (int)arg4, (uint32_t)arg5, current_process->pid);
     pt_regs_set_return(frame, 0);
+    break;
+  case SYS_WINDOW_WRITE:
+    /* write text to a window by id (#123) — needs CAP_WINDOW.  Replaces the
+     * old fd>=100 overload on write(). */
+    if (!proc_has_cap(current_process, CAP_WINDOW)) {
+      pt_regs_set_return(frame, -EPERM);
+      break;
+    }
+    pt_regs_set_return(
+        frame, window_text_write((int)arg0, (const char *)arg1, (size_t)arg2));
     break;
   case SYS_COMPOSITOR_RENDER:
     compositor_render();
@@ -784,20 +820,19 @@ extern void uart_puts(const char *str);
  *
  * Routes through the per-process fd table (ABI-03 RESOLVED, kernel/fd.h):
  *
- *   fd >= 100  legacy window-id alias: writes to that compositor window
- *              directly (kept until the window ABI moves onto the table).
- *   FD_WIN     window text sink: copies up to min(count, 1023) bytes into
- *              the per-CPU syscall_buf, echoes to the UART (the serial
- *              mirror of on-screen text), resolves win_id==-1 to the
- *              caller's own window by PID, and appends to the window.
+ *   FD_WIN     window text sink (stdout): bounce-buffers the data (no
+ *              truncation, capped at SYSCALL_MAX_IO_BYTES), echoes to the
+ *              UART (serial mirror), and appends to the target window —
+ *              resolved once at spawn (inherited from the parent's terminal,
+ *              USR-TTY-01 #123) or by PID if still unset.
  *   FD_FILE    VFS write at the fd's private offset (bounce buffer, capped
- *              at SYSCALL_MAX_IO_BYTES — no 1023-byte truncation); advances
- *              the offset and refreshes the cached node size.
+ *              at SYSCALL_MAX_IO_BYTES); advances the offset and refreshes
+ *              the cached node size.
  *   FD_KBD     not writable: -EINVAL.
  *   invalid    -EBADF.
  *
- * NOTE(ABI-06, window path only): silently truncates window writes > 1023
- *              bytes; file writes are NOT truncated anymore.
+ * Writing to a specific window by id (not stdout) is SYS_WINDOW_WRITE; the
+ * old fd>=100 overload on write() is gone (#123).
  *
  * Locking: none (cpu->syscall_buf is per-CPU, safe without a lock during a
  *          syscall because the calling process is pinned to this CPU).
@@ -807,19 +842,6 @@ extern void uart_puts(const char *str);
 long sys_write(int fd, const char *buf, size_t count) {
   if (count == 0) return 0;
 
-  /* Legacy window-id alias (fd >= 100). */
-  if (fd >= 100) {
-    struct cpu_info *cpu = get_cpu_info();
-    char *k_buf = cpu->syscall_buf;
-    size_t to_copy = (count >= 1024) ? 1023 : count;
-    if (arch_copy_from_user(k_buf, buf, to_copy) != 0)
-      return -EFAULT;
-    k_buf[to_copy] = '\0';
-    uart_puts(k_buf);
-    compositor_window_write(fd, k_buf, to_copy);
-    return (long)to_copy;
-  }
-
   struct fd_entry *e = NULL;
   if (current_process && fd >= 0 && fd < NPROC_FDS &&
       current_process->fds[fd].type != FD_NONE)
@@ -828,19 +850,13 @@ long sys_write(int fd, const char *buf, size_t count) {
     return -EBADF;
 
   if (e->type == FD_WIN) {
-    struct cpu_info *cpu = get_cpu_info();
-    char *k_buf = cpu->syscall_buf;
-    size_t to_copy = (count >= 1024) ? 1023 : count; /* NOTE(ABI-06) */
-    if (arch_copy_from_user(k_buf, buf, to_copy) != 0)
-      return -EFAULT;
-    k_buf[to_copy] = '\0';
-    uart_puts(k_buf);
+    /* stdout sink: win_id is resolved once at spawn (inherited from the
+     * parent's terminal, USR-TTY-01 #123) or, if still unset, to the
+     * caller's own window by PID. */
     int win_id = e->win_id;
     if (win_id < 0)
       win_id = compositor_get_window_by_pid(current_process->pid);
-    if (win_id > 0)
-      compositor_window_write(win_id, k_buf, to_copy);
-    return (long)to_copy;
+    return window_text_write(win_id, buf, count);
   }
 
   if (e->type == FD_FILE) {

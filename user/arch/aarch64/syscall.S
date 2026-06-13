@@ -40,6 +40,7 @@ _start:
 .global _sys_flush
 .global _sys_create_window
 .global _sys_window_draw
+.global _sys_window_write
 .global _sys_window_blit
 .global _sys_compositor_render
 .global _sys_file_write
@@ -153,6 +154,12 @@ _sys_create_window:
 /* Args: x0..x5 */
 _sys_window_draw:
     mov x8, #SYS_WINDOW_DRAW
+    svc #0
+    ret
+
+/* long _sys_window_write(int win_id, const char *buf, unsigned long count) */
+_sys_window_write:
+    mov x8, #SYS_WINDOW_WRITE
     svc #0
     ret
 

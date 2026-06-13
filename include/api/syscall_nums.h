@@ -44,6 +44,7 @@
 #define SYS_WINDOW_BLIT        213
 #define SYS_WINDOW_SET_FLAGS   214
 #define SYS_DESTROY_WINDOW     215
+#define SYS_WINDOW_WRITE       217  /* write text to a window by id (#123) */
 
 /* --- Memory --- */
 #define SYS_SBRK               216

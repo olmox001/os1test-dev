@@ -52,6 +52,7 @@ extern void _sys_flush(void);
 extern int  _sys_create_window(int x, int y, int w, int h, const char *title);
 extern void _sys_destroy_window(int win_id);
 extern void _sys_window_draw(int win_id, int x, int y, int w, int h, unsigned int color);
+extern long _sys_window_write(int win_id, const char *buf, unsigned long count);
 extern void _sys_window_blit(int win_id, int x, int y, int w, int h, const unsigned int *buf);
 extern void _sys_compositor_render(void);
 extern void _sys_window_set_flags(int win_id, int flags);
@@ -134,6 +135,9 @@ void print(const char *s);
 void print_hex(unsigned long val);
 int  printf(const char *fmt, ...);
 void printf_win(int win_id, const char *fmt, ...);
+/* window_write: write text straight to a window you own, by id (#123).
+ * Replaces the old fd>=100 overload on write(). */
+void window_write(int win_id, const char *buf, unsigned long count);
 int  sprintf(char *out, const char *fmt, ...);
 int  snprintf(char *out, size_t size, const char *fmt, ...);
 int  vsnprintf(char *out, size_t size, const char *fmt, va_list args);

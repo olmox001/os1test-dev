@@ -149,7 +149,7 @@ int main(void) {
     }
 
     /* 4. UNICA EMISSIONE ATOMICA DI TUTTA LA LISTA */
-    _sys_write(my_win, screen_buffer, buf_idx);
+    _sys_window_write(my_win, screen_buffer, buf_idx);
 
     /* 5. REFRESH RATE (1Hz) */
     for (int delay = 0; delay < 200; delay++) {

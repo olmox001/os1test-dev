@@ -127,6 +127,13 @@ _sys_window_draw:
     syscall
     ret
 
+/* long _sys_window_write(int win_id, const char *buf, unsigned long count) */
+.global _sys_window_write
+_sys_window_write:
+    movq $SYS_WINDOW_WRITE, %rax
+    syscall
+    ret
+
 .global _sys_window_blit
 _sys_window_blit:
     movq $SYS_WINDOW_BLIT, %rax

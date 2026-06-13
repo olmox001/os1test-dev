@@ -47,16 +47,16 @@ int main(void) {
   }
 
   /* Pulizia dello schermo e banner di avvio nella nuova finestra grafica */
-  _sys_write(my_win, "\033[H\033[J", 6); // ANSI Clear Screen
-  _sys_write(my_win, "\033[1;31m========================================\n",
+  _sys_window_write(my_win, "\033[H\033[J", 6); // ANSI Clear Screen
+  _sys_window_write(my_win, "\033[1;31m========================================\n",
              46);
-  _sys_write(my_win, "  NEXS QUOTA DOS TEST (SCHED-DOS-01)\n", 37);
-  _sys_write(my_win, "========================================\033[0m\n\n", 46);
+  _sys_window_write(my_win, "  NEXS QUOTA DOS TEST (SCHED-DOS-01)\n", 37);
+  _sys_window_write(my_win, "========================================\033[0m\n\n", 46);
 
-  _sys_write(my_win, "[TTY] Finestra inizializzata. PID: ", 35);
+  _sys_window_write(my_win, "[TTY] Finestra inizializzata. PID: ", 35);
   local_itoa(get_pid(), buf);
-  _sys_write(my_win, buf, local_strlen(buf));
-  _sys_write(my_win,
+  _sys_window_write(my_win, buf, local_strlen(buf));
+  _sys_window_write(my_win,
              "\n[TTY] Avvio attacco controllato sulla coda dei processi...\n\n",
              60);
 
@@ -67,10 +67,10 @@ int main(void) {
       created++;
 
       /* Feedback visivo immediato nella finestra dedicata */
-      _sys_write(my_win, "[+] Creato figlio PID: ", 23);
+      _sys_window_write(my_win, "[+] Creato figlio PID: ", 23);
       local_itoa(pid, buf);
-      _sys_write(my_win, buf, local_strlen(buf));
-      _sys_write(my_win, "\n", 1);
+      _sys_window_write(my_win, buf, local_strlen(buf));
+      _sys_window_write(my_win, "\n", 1);
     } else {
       /* La quota di protezione per-parent (32 processi) è scattata con
        * successo! */
@@ -78,14 +78,14 @@ int main(void) {
           my_win,
           "\n\033[1;33m[!] STOP COMPULSIRE! Lo spawn e' stato rifiutato.\n",
           54);
-      _sys_write(my_win, "[!] Totale figli allocati prima del blocco: ", 44);
+      _sys_window_write(my_win, "[!] Totale figli allocati prima del blocco: ", 44);
       local_itoa(created, buf);
-      _sys_write(my_win, buf, local_strlen(buf));
+      _sys_window_write(my_win, buf, local_strlen(buf));
 
-      _sys_write(my_win, "\n[!] Codice di errore restituito dal kernel: ", 45);
+      _sys_window_write(my_win, "\n[!] Codice di errore restituito dal kernel: ", 45);
       local_itoa(pid, buf);
-      _sys_write(my_win, buf, local_strlen(buf));
-      _sys_write(my_win, " (Quota attiva con successo)\033[0m\n", 34);
+      _sys_window_write(my_win, buf, local_strlen(buf));
+      _sys_window_write(my_win, " (Quota attiva con successo)\033[0m\n", 34);
       break;
     }
 
@@ -98,7 +98,7 @@ int main(void) {
       my_win,
       "\n\033[1;32m[OK] Sistema protetto. La shell originale e' reattiva.\n",
       61);
-  _sys_write(my_win,
+  _sys_window_write(my_win,
              "[OK] Puoi fare 'kill' di questo processo in sicurezza.\033[0m\n",
              61);
 

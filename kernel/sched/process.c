@@ -682,6 +682,26 @@ struct process *process_create_caps(const char *name, uint8_t priority,
 
   spin_unlock_irqrestore(&sched_lock, flags);
 
+  /* stdout inheritance (USR-TTY-01 #123): a child writes its stdout into the
+   * SAME window as its spawner's terminal, so a program launched from the
+   * shell prints in the shell window instead of its own / UART-only.  Resolve
+   * the parent's stdout target here — OUTSIDE sched_lock, because the
+   * compositor lookup takes compositor_lock (avoids a sched->compositor lock
+   * order).  Safe to touch proc->fds now: it is in the pool but still
+   * PROC_CREATED (not runnable), and only the owner ever writes its fd table.
+   * If the parent has no window the child keeps win_id = -1 (resolve to its
+   * own window by PID at write time). */
+  if (creator) {
+    extern int compositor_get_window_by_pid(int pid);
+    int parent_win = creator->fds[1].win_id;
+    if (parent_win < 0)
+      parent_win = compositor_get_window_by_pid((int)creator->pid);
+    if (parent_win > 0) {
+      proc->fds[1].win_id = parent_win;
+      proc->fds[2].win_id = parent_win;
+    }
+  }
+
   proc->page_table = vmm_create_pgd();
 
   pr_info("process_create: '%s' PID=%u slot=%u Prio=%d PageTable=%p\n", name,
