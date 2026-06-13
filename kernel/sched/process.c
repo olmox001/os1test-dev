@@ -682,13 +682,20 @@ struct process *process_create_caps(const char *name, uint8_t priority,
 
   spin_unlock_irqrestore(&sched_lock, flags);
 
-  /* Each process owns its stdout window: fds 1/2 keep win_id = -1, resolved
-   * to the process's OWN compositor window by PID at write time (process_fd_init).
-   * A child does NOT inherit the spawner's terminal — graphical/TTY apps
-   * (doom, top, forkbomb) create their own window and must render there, not
-   * in the launching shell.  "Integrated terminal" output (a child writing
-   * into the shell window) is a deliberate future window-mode, not the
-   * default (USR-TTY-01 #123, the modern-terminal/mode work). */
+  /* Controlling terminal (USR-TTY-01 #123): the child inherits the spawner's
+   * terminal window so a windowless CLI tool's stdout lands in the launching
+   * shell (POSIX-like).  This is NOT blanket stdout redirection: sys_write
+   * resolves the process's OWN window FIRST and only falls back to ctty_win,
+   * so a process that opens its own window (doom, top, forkbomb) renders
+   * there, not in the shell.  Resolved outside sched_lock (the compositor
+   * lookup takes compositor_lock).  ctty propagates down the tree: the
+   * spawner's own window if it has one, else its inherited ctty. */
+  proc->ctty_win = -1;
+  if (creator) {
+    extern int compositor_get_window_by_pid(int pid);
+    int term = compositor_get_window_by_pid((int)creator->pid);
+    proc->ctty_win = (term > 0) ? term : creator->ctty_win;
+  }
 
   proc->page_table = vmm_create_pgd();
 

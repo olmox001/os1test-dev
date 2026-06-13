@@ -214,6 +214,7 @@ long lseek(int fd, long offset, int whence) { return _sys_lseek(fd, offset, when
 int vsprintf(char *out, const char *fmt, va_list args) { return vsnprintf(out, 65536, fmt, args); }
 int printf(const char *fmt, ...) { char buf[256]; va_list args; va_start(args, fmt); int res = vsnprintf(buf, sizeof(buf), fmt, args); va_end(args); write(1, buf, strlen(buf)); return res; }
 void window_write(int win_id, const char *buf, unsigned long count) { _sys_window_write(win_id, buf, count); }
+int window_of_pid(int pid) { return _sys_window_of_pid(pid); }
 void printf_win(int win_id, const char *fmt, ...) { char buf[512]; va_list args; va_start(args, fmt); vsnprintf(buf, sizeof(buf), fmt, args); va_end(args); _sys_window_write(win_id, buf, strlen(buf)); }
 int sprintf(char *out, const char *fmt, ...) { va_list args; va_start(args, fmt); int res = vsnprintf(out, 65536, fmt, args); va_end(args); return res; }
 int snprintf(char *out, size_t size, const char *fmt, ...) { va_list args; va_start(args, fmt); int res = vsnprintf(out, size, fmt, args); va_end(args); return res; }

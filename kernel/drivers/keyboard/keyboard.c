@@ -49,11 +49,6 @@ static const keyboard_layout_t layout_it = {
 
 static const keyboard_layout_t *current_layout = &layout_us;
 
-/* Input buffer */
-#define KB_BUFFER_SIZE 256
-static char kb_buffer[KB_BUFFER_SIZE];
-static volatile uint32_t kb_head = 0;
-static volatile uint32_t kb_tail = 0;
 
 /* Scancode to ASCII table (US layout) */
 static const char scancode_to_ascii[128] = {
@@ -99,8 +94,6 @@ static const char scancode_to_ascii_shift[128] = {
  * Initialize keyboard subsystem
  */
 void keyboard_init(void) {
-  kb_head = 0;
-  kb_tail = 0;
   shift_pressed = 0;
   ctrl_pressed = 0;
   caps_lock = 0;
@@ -156,14 +149,21 @@ static void keyboard_process_key(uint16_t code, int32_t value) {
     return;
   }
 
-  /* Handle Ctrl+C */
+  /* Handle Ctrl+C: deliver ETX (0x03) to the focused process through the
+   * SAME IPC path as normal keys, so read(0)/try_recv see it (the old
+   * kb_buffer path was never drained by the fd-based read).  The shell turns
+   * a foreground job's Ctrl+C into a kill (USR-TTY-01 #123). */
   if (ctrl_pressed && code == KEY_C && value != 0) {
-    /* Add ETX (End of Text) to buffer */
-    char c = 0x03;
-    uint32_t next = (kb_head + 1) % KB_BUFFER_SIZE;
-    if (next != kb_tail) {
-      kb_buffer[kb_head] = c;
-      kb_head = next;
+    if (keyboard_focus_pid > 0) {
+      struct ipc_message msg;
+      memset(&msg, 0, sizeof(msg));
+      msg.from = 0; /* Kernel/Driver */
+      msg.type = IPC_TYPE_INPUT;
+      msg.data1 = ((uint64_t)code << 16) | 0x03;
+      msg.data2 = 1; /* press */
+      msg.payload[0] = 0x03;
+      msg.payload[1] = '\0';
+      kernel_ipc_send(keyboard_focus_pid, &msg);
     }
     return;
   }

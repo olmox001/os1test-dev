@@ -134,6 +134,13 @@ _sys_window_write:
     syscall
     ret
 
+/* int _sys_window_of_pid(int pid) */
+.global _sys_window_of_pid
+_sys_window_of_pid:
+    movq $SYS_WINDOW_OF_PID, %rax
+    syscall
+    ret
+
 .global _sys_window_blit
 _sys_window_blit:
     movq $SYS_WINDOW_BLIT, %rax

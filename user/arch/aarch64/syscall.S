@@ -41,6 +41,7 @@ _start:
 .global _sys_create_window
 .global _sys_window_draw
 .global _sys_window_write
+.global _sys_window_of_pid
 .global _sys_window_blit
 .global _sys_compositor_render
 .global _sys_file_write
@@ -160,6 +161,12 @@ _sys_window_draw:
 /* long _sys_window_write(int win_id, const char *buf, unsigned long count) */
 _sys_window_write:
     mov x8, #SYS_WINDOW_WRITE
+    svc #0
+    ret
+
+/* int _sys_window_of_pid(int pid) */
+_sys_window_of_pid:
+    mov x8, #SYS_WINDOW_OF_PID
     svc #0
     ret
 

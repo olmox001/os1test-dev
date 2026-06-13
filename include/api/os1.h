@@ -53,6 +53,7 @@ extern int  _sys_create_window(int x, int y, int w, int h, const char *title);
 extern void _sys_destroy_window(int win_id);
 extern void _sys_window_draw(int win_id, int x, int y, int w, int h, unsigned int color);
 extern long _sys_window_write(int win_id, const char *buf, unsigned long count);
+extern int  _sys_window_of_pid(int pid);
 extern void _sys_window_blit(int win_id, int x, int y, int w, int h, const unsigned int *buf);
 extern void _sys_compositor_render(void);
 extern void _sys_window_set_flags(int win_id, int flags);
@@ -138,6 +139,9 @@ void printf_win(int win_id, const char *fmt, ...);
 /* window_write: write text straight to a window you own, by id (#123).
  * Replaces the old fd>=100 overload on write(). */
 void window_write(int win_id, const char *buf, unsigned long count);
+/* window_of_pid: compositor window id of a pid, 0 if it has none (#123).
+ * The shell uses it to run windowless programs in-shell (foreground). */
+int  window_of_pid(int pid);
 int  sprintf(char *out, const char *fmt, ...);
 int  snprintf(char *out, size_t size, const char *fmt, ...);
 int  vsnprintf(char *out, size_t size, const char *fmt, va_list args);

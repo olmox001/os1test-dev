@@ -66,6 +66,12 @@ struct process {
 
   uint8_t level;  /* privilege level (PLVL_*) — see the capability model below */
   uint32_t caps;  /* capability mask (CAP_*); machine level bypasses checks */
+  /* ctty_win: controlling-terminal window (USR-TTY-01 #123).  Inherited from
+   * the spawner at process_create: the launching shell's window.  A process
+   * with NO window of its own (a POSIX-like CLI tool) writes stdout here, so
+   * it runs "in the shell"; a process that opens its own window renders there
+   * instead (own-window-first in sys_write).  -1 = none. */
+  int ctty_win;
   /* parent_pid: PID of the process that spawned this one (0 = kernel/boot).
    * Set by process_create() from current_process; used by the SYS_KILL
    * capability check (ABI-04): a process may kill itself or any descendant,

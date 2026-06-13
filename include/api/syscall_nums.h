@@ -45,6 +45,7 @@
 #define SYS_WINDOW_SET_FLAGS   214
 #define SYS_DESTROY_WINDOW     215
 #define SYS_WINDOW_WRITE       217  /* write text to a window by id (#123) */
+#define SYS_WINDOW_OF_PID      218  /* window id of a pid, 0 if none (#123) */
 
 /* --- Memory --- */
 #define SYS_SBRK               216

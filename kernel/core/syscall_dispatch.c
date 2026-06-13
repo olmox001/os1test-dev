@@ -393,6 +393,15 @@ struct pt_regs *kernel_syscall_dispatcher(struct pt_regs *frame) {
     pt_regs_set_return(
         frame, window_text_write((int)arg0, (const char *)arg1, (size_t)arg2));
     break;
+  case SYS_WINDOW_OF_PID: {
+    /* Read-only: the compositor window id of a pid, or 0 if it has none.
+     * The shell uses it to tell a windowless (run-in-shell) program from one
+     * that opened its own window (#123).  No capability needed. */
+    extern int compositor_get_window_by_pid(int pid);
+    int w = compositor_get_window_by_pid((int)arg0);
+    pt_regs_set_return(frame, w > 0 ? w : 0);
+    break;
+  }
   case SYS_COMPOSITOR_RENDER:
     compositor_render();
     pt_regs_set_return(frame, 0);
@@ -849,12 +858,15 @@ long sys_write(int fd, const char *buf, size_t count) {
     return -EBADF;
 
   if (e->type == FD_WIN) {
-    /* stdout sink: resolve to the caller's OWN compositor window by PID
-     * (win_id stays -1 from process_fd_init; a child does not inherit the
-     * spawner's terminal — see process_create). */
+    /* stdout sink (USR-TTY-01 #123): resolve the caller's OWN window first;
+     * a process with its own window (doom, top, forkbomb) renders there.  A
+     * windowless CLI tool falls back to its controlling terminal (the
+     * launching shell), so it runs "in the shell" POSIX-style. */
     int win_id = e->win_id;
     if (win_id < 0)
       win_id = compositor_get_window_by_pid(current_process->pid);
+    if (win_id <= 0)
+      win_id = current_process->ctty_win;
     return window_text_write(win_id, buf, count);
   }
 

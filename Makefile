@@ -305,7 +305,8 @@ BIN_ELFS = $(BUILD_DIR)/counter.elf $(BUILD_DIR)/demo3d.elf $(BUILD_DIR)/ipc_sen
            $(BUILD_DIR)/ipc_recv.elf $(BUILD_DIR)/crash.elf $(BUILD_DIR)/writetest.elf \
            $(BUILD_DIR)/doom.elf $(BUILD_DIR)/input_test.elf $(BUILD_DIR)/nxtest.elf \
            $(BUILD_DIR)/fdtest.elf $(BUILD_DIR)/forkbomb.elf \
-           $(BUILD_DIR)/sandboxtest.elf $(BUILD_DIR)/sandboxchild.elf
+           $(BUILD_DIR)/sandboxtest.elf $(BUILD_DIR)/sandboxchild.elf \
+           $(BUILD_DIR)/hello.elf
 
 USER_ELFS = $(SYS_ELFS) $(BIN_ELFS)
 
@@ -344,6 +345,7 @@ $(BUILD_DIR)/fdtest.elf: $(BUILD_DIR)/$(USER_DIR)/bin/fdtest.o $(USER_LIB_O) $(U
 $(BUILD_DIR)/forkbomb.elf: $(BUILD_DIR)/$(USER_DIR)/bin/forkbomb.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/sandboxtest.elf: $(BUILD_DIR)/$(USER_DIR)/bin/sandboxtest.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/sandboxchild.elf: $(BUILD_DIR)/$(USER_DIR)/bin/sandboxchild.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
+$(BUILD_DIR)/hello.elf: $(BUILD_DIR)/$(USER_DIR)/bin/hello.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/nxtest.elf: $(BUILD_DIR)/$(USER_DIR)/bin/nxtest.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/input_test.elf: $(BUILD_DIR)/$(USER_DIR)/bin/input_test.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)
 $(BUILD_DIR)/fontman.elf: $(BUILD_DIR)/$(USER_DIR)/sys/bin/fontman/fontman.o $(USER_LIB_O) $(USER_SYSCALL_O) $(USER_MALLOC_O)

@@ -154,6 +154,40 @@ static int spawn_search(const char *name, char *out_path) {
  *
  * Side effects: writes to UART/window, may spawn processes, may call exit().
  */
+/*
+ * run_foreground - run a freshly-spawned child as a foreground shell job
+ * (USR-TTY-01 #123, POSIX-like).
+ *
+ * A windowless CLI program writes its stdout into THIS shell's window (its
+ * controlling terminal, resolved kernel-side), so it runs "in the shell".
+ * We poll until it exits or the user presses Ctrl+C (ETX 0x03, delivered as
+ * a keyboard IPC press), which kills it.  If the child opens its OWN window
+ * it is a graphical/TTY app (doom, top, forkbomb): it detaches and we return
+ * to the prompt immediately, leaving it running in its own window.
+ *
+ * Priorities are untouched: the child is a normal independent process; this
+ * loop only watches it and yields.  stdin is not yet forwarded to the job
+ * (CLI tools that read input are a follow-up); other keystrokes are consumed.
+ */
+static void run_foreground(int pid) {
+  if (pid <= 0)
+    return;
+  while (1) {
+    if (window_of_pid(pid) > 0)
+      break; /* child opened its own window -> detached */
+    if (wait(pid) != -1)
+      break; /* child finished (dead/zombie/gone) */
+    struct ipc_message m;
+    if (try_recv(-1, &m) == 0 && m.type == IPC_TYPE_INPUT && m.data2 != 0 &&
+        m.payload[0] == 0x03) {
+      kill_process(pid);
+      print("^C\n");
+      break;
+    }
+    yield();
+  }
+}
+
 static void process_command(void) {
   cmd_buf[cmd_len] = '\0';
   if (cmd_len == 0)
@@ -321,7 +355,7 @@ static void process_command(void) {
       char path[SPAWN_PATH_MAX];
       int pid = spawn_search(arg, path);
       if (pid > 0) {
-        printf("Started %s (PID %d)\n", path, pid);
+        run_foreground(pid); /* in-shell if windowless, else detaches */
       } else {
         printf("exec: not found: %s\n", arg);
       }
@@ -341,7 +375,7 @@ static void process_command(void) {
     char path[SPAWN_PATH_MAX];
     int pid = spawn_search(cmd_buf, path);
     if (pid > 0) {
-      printf("Started %s (PID %d)\n", path, pid);
+      run_foreground(pid); /* in-shell if windowless, else detaches */
     } else {
       printf("Unknown command: %s\n", cmd_buf);
     }
