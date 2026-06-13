@@ -10,6 +10,13 @@
 > arches**), **B3 DONE** (epic #93 closed — numbering+errno, capabilities,
 > fd table #90, IPC-01 #85, the 4-level privilege/capability sandbox #79, and
 > the userland legacy purge #123 all landed).
+> **Release/storage interlude (2026-06-13, `docs/MICROSCOPE-RELEASE-STORAGE.md`)**:
+> the **block contract** (ASTRA seam) landed and the amd64 **release ISO now
+> boots self-contained** via a RAM-backed ramdisk over a GRUB module
+> (userland-only `disk.img`); plus a working **PS/2 keyboard+mouse** driver
+> (amd64) for real-HW/UTM input.  Remaining there: aarch64 unification + GRUB
+> ISO, free the module RAM, tmpfs/xfs.  The B3-polish/TTY queue
+> (`docs/B3-POLISH-QUEUE.md`) is paused behind it.
 > All work lives on branch `comprehensive-review` (pushed to origin); the
 > maintainer merges to `main` himself.
 

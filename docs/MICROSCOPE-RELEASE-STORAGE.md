@@ -129,5 +129,34 @@ reservations; document the memory map per arch.
   everything else is a provider behind the block/VFS contract.
 
 ## 5. Status
-- R1 step 1–4: **planned** (this doc).  Diagnosis verified 2026-06-13.
-- Paused B3-polish queue: see `docs/B3-POLISH-QUEUE.md` (resume after R1–R4).
+
+**R1 — DONE (2026-06-13).** The amd64 release ISO boots fully self-contained.
+- `fd720be` block contract (ASTRA seam `virtio-blk → block → fs → VFS`);
+  virtio-blk is a provider, the FS stack consumes `block_read/block_write`.
+- `be85d52` mkdisk → **userland-only** single ext4 rootfs partition (boot/kernel
+  partitions dropped; they were never read back).
+- `d2ac0fc` RAM-backed **ramdisk** over a GRUB multiboot2 MODULE, behind the HAL
+  contract `arch_platform_get_boot_module()` (amd64 walks the MB2 MODULE tag in
+  `hal.c`; aarch64 returns none — no `#ifdef` in the driver, frozen platform.c
+  untouched).  Two boot-path bugs fixed along the way: pmm metadata was placed
+  on top of the module (now skips RESERVED regions) and `vmm_init` mapped only
+  a fixed 128 MB bootstrap window (now maps up to `pmm_metadata_top()`, so a
+  module that pushes the metadata high is still reachable after the CR3 switch).
+  Result: `GRUB → kernel + disk.img module → ramdisk → GPT → ext4 mounted →
+  shell`, 0 panics; `make run` still mounts via virtio-blk on both arches.
+
+**Open / next (the rest of the user's release-phase list):**
+- Free the module RAM after boot (the rootfs is read on demand from the module;
+  reclaim once a tmpfs/page-cache copy exists — ties into R2).
+- **Unify aarch64**: a DTB `/chosen` initrd → the same ramdisk backend; GRUB
+  ISO for aarch64 (`grub` via brew) so both arches ship one image.
+- R2 tmpfs · R3 xfs · R4 memory drivers (unchanged from §3).
+- UTM: the release boots with minimal flags (only gpu-pci) to the shell; the
+  apparent "stuck" was PS/2 input (UTM is PS/2-only) — fixed, see below.
+
+**Out of band (not storage, landed same day):** PS/2 keyboard+mouse driver
+(amd64) `09ef8d5` + `807a68b` — was non-functional: handlers registered the
+bare ISA IRQ line instead of the PIC vector (32+n), and mouse AUX commands
+lacked the `0xD4` prefix.  Both fixed and verified.
+
+- Paused B3-polish queue: see `docs/B3-POLISH-QUEUE.md` (resume after R2–R4).
