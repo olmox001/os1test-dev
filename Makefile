@@ -163,6 +163,7 @@ KERN_C_SOURCES += \
     $(KERNEL_DIR)/drivers/irq_ctrl.c \
     $(KERNEL_DIR)/drivers/sys_timer.c \
     $(KERNEL_DIR)/drivers/block/block.c \
+    $(KERNEL_DIR)/drivers/block/ramdisk.c \
     $(KERNEL_DIR)/drivers/virtio/virtio_blk.c \
     $(KERNEL_DIR)/drivers/virtio/virtio_input.c \
     $(KERNEL_DIR)/drivers/gpu/virtio_gpu.c \
@@ -255,7 +256,7 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/sys/bin
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/bin
 	@mkdir -p $(BUILD_DIR)/$(USER_ARCH_DIR)
-
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/drivers/block
 # Bootloader
 bootloader: $(BOOTLOADER_BIN)
 

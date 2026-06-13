@@ -108,6 +108,13 @@ static uint64_t free_pages;
  * total_pages is the metadata SPAN (up to the highest usable end address) and
  * may exceed this when the map has holes; immutable after pmm_early_init(). */
 static uint64_t usable_pages;
+/* pmm_metadata_end_phys: physical end of the page_array + bitmaps, set in
+ * pmm_early_init().  vmm_init() maps the bootstrap window up to here so the
+ * metadata is reachable after the CR3/TTBR switch even when a boot module
+ * pushed it far past the kernel image. */
+static uint64_t pmm_metadata_end_phys;
+
+uint64_t pmm_metadata_top(void) { return pmm_metadata_end_phys; }
 
 /*
  * Mark a page as used in the bitmap
@@ -308,7 +315,27 @@ void pmm_early_init(struct mem_region *regions, size_t count) {
       uint64_t kernel_limit = PAGE_ALIGN(virt_to_phys(__kernel_end));
       uint64_t target = regions[i].base;
       if (target < kernel_limit) target = kernel_limit;
-      
+
+      /* Must not land on any RESERVED region.  A GRUB boot module (the
+       * release rootfs) is loaded right after the kernel — exactly where
+       * the metadata wants to go — so bump 'target' past every reserved
+       * region it would overlap.  The table is unsorted, so iterate to a
+       * fixpoint. */
+      int bumped = 1;
+      while (bumped) {
+        bumped = 0;
+        for (size_t j = 0; j < count; j++) {
+          if (regions[j].type == MEM_REGION_USABLE)
+            continue;
+          uint64_t r_start = regions[j].base;
+          uint64_t r_end = PAGE_ALIGN(regions[j].base + regions[j].size);
+          if (target < r_end && target + total_metadata_size > r_start) {
+            target = r_end;
+            bumped = 1;
+          }
+        }
+      }
+
       if (target + total_metadata_size <= regions[i].base + regions[i].size) {
         metadata_phys = target;
         break;
@@ -319,6 +346,11 @@ void pmm_early_init(struct mem_region *regions, size_t count) {
   if (!metadata_phys) {
     panic("PMM: Failed to allocate metadata area (%lu KB needed)", total_metadata_size / 1024);
   }
+
+  /* Physical end of the metadata, so vmm_init can ensure the bootstrap map
+   * covers it wherever it landed (a boot module can push it well past the
+   * kernel image). */
+  pmm_metadata_end_phys = metadata_phys + total_metadata_size;
 
   /* 4. Map pointers (kernel VAs via the direct map; identity while
    * KERNEL_VIRT_BASE == 0) */

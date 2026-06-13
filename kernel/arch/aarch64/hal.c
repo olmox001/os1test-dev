@@ -24,8 +24,19 @@
 #include <kernel/hal.h>
 #include <kernel/string.h>
 #include <kernel/printk.h>
+#include <kernel/platform.h>
 #include <arch/platform.h>
 #include <drivers/virtio.h>
+
+/* arch_platform_get_boot_module (HAL contract, platform.h): aarch64 boots a
+ * raw kernel + a virtio-blk disk, with no GRUB/initrd module today.  Returns
+ * 0; a future DTB /chosen initrd would slot in here, keeping the ramdisk
+ * block backend identical to amd64. */
+int arch_platform_get_boot_module(uint64_t *base, uint64_t *size) {
+  (void)base;
+  (void)size;
+  return 0;
+}
 
 /*
  * arch_bus_scan - probe VirtIO MMIO slots and register discovered devices.

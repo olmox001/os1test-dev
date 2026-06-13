@@ -29,8 +29,47 @@
 #include <drivers/pci.h>
 #include <kernel/string.h>
 #include <kernel/printk.h>
+#include <kernel/platform.h>
+#include <kernel/multiboot2.h>
 #include <drivers/timer.h>
 #include <arch/amd64/apic.h>
+
+/* arch_platform_get_boot_module (HAL contract, platform.h): walk the GRUB
+ * multiboot2 tag chain for a MODULE (the release rootfs disk.img loaded into
+ * RAM).  Cached on first call (invoked early, before the identity map is torn
+ * down) so later callers — the ramdisk backend after vmm_init — still get it.
+ * mb_magic / arch_get_boot_info() come from this arch's boot stub. */
+extern uint64_t mb_magic;
+uint64_t arch_get_boot_info(void);
+
+int arch_platform_get_boot_module(uint64_t *base, uint64_t *size) {
+  static int probed = 0;
+  static uint64_t mod_base, mod_size;
+  if (!probed) {
+    probed = 1;
+    if (mb_magic == MB2_MAGIC) {
+      uint8_t *d = (uint8_t *)arch_get_boot_info();
+      if (d) {
+        struct mb2_tag *tag = (struct mb2_tag *)(d + 8);
+        while (tag->type != MB2_TAG_TYPE_END) {
+          if (tag->type == MB2_TAG_TYPE_MODULE) {
+            struct mb2_tag_module *m = (struct mb2_tag_module *)tag;
+            mod_base = m->mod_start;
+            mod_size = (uint64_t)m->mod_end - m->mod_start;
+            break;
+          }
+          tag = (struct mb2_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7u));
+        }
+      }
+    }
+  }
+  if (mod_base) {
+    if (base) *base = mod_base;
+    if (size) *size = mod_size;
+    return 1;
+  }
+  return 0;
+}
 
 static void amd64_pci_callback(int bdf, uint16_t vendor, uint16_t device_id) {
     struct hal_device dev;
