@@ -475,30 +475,36 @@ release-arch: all
 	@echo "--> Building $(ARCH) release..."
 	@rm -rf $(RELEASE_DIR)
 	@mkdir -p $(RELEASE_DIR)
-ifeq ($(ARCH), amd64)
-	@rm -rf $(RELEASE_DIR)/iso
-	@mkdir -p $(RELEASE_DIR)/iso/boot/grub
-	
-	@cp $(KERNEL_ELF) $(RELEASE_DIR)/iso/boot/kernel.elf
-	
-	@echo 'set timeout=0' > $(RELEASE_DIR)/iso/boot/grub/grub.cfg
-	@echo 'set default=0' >> $(RELEASE_DIR)/iso/boot/grub/grub.cfg
-	@echo 'menuentry "OS1Test" {' >> $(RELEASE_DIR)/iso/boot/grub/grub.cfg
-	@echo '  multiboot2 /boot/kernel.elf' >> $(RELEASE_DIR)/iso/boot/grub/grub.cfg
-	@echo '  boot' >> $(RELEASE_DIR)/iso/boot/grub/grub.cfg
-	@echo '}' >> $(RELEASE_DIR)/iso/boot/grub/grub.cfg
-	
-	@dd if=$(DISK_IMG) of=$(BUILD_DIR)/userland.img bs=512 skip=34850 status=none
-	
-	$(GRUB_MKRESCUE) -o $(RELEASE_DIR)/os1test-amd64-$(VERSION).iso $(RELEASE_DIR)/iso \
-		-- -append_partition 2 0x83 $(BUILD_DIR)/userland.img
-	
-	@echo "✓ AMD64 Hybrid ISO: $(RELEASE_DIR)/os1test-amd64-$(VERSION).iso"
-else
-	@cp $(KERNEL_BIN) $(RELEASE_DIR)/kernel.img
-	@cp $(DISK_IMG) $(RELEASE_DIR)/disk.img
-	@echo "✓ AArch64 release files: kernel.img, disk.img"
-endif
+	@if [ "$(ARCH)" = "amd64" ]; then \
+		set -e; \
+		mkdir -p $(RELEASE_DIR)/boot/grub; \
+		cp $(KERNEL_ELF) $(RELEASE_DIR)/boot/kernel.elf; \
+		cp $(DISK_IMG)   $(RELEASE_DIR)/boot/disk.img; \
+		echo 'set timeout=0'        >  $(RELEASE_DIR)/boot/grub/grub.cfg; \
+		echo 'set default=0'        >> $(RELEASE_DIR)/boot/grub/grub.cfg; \
+		echo 'menuentry "OS1Test" {' >> $(RELEASE_DIR)/boot/grub/grub.cfg; \
+		echo '    multiboot2 /boot/kernel.elf' >> $(RELEASE_DIR)/boot/grub/grub.cfg; \
+		echo '    module2 /boot/disk.img diskimg' >> $(RELEASE_DIR)/boot/grub/grub.cfg; \
+		echo '    boot' >> $(RELEASE_DIR)/boot/grub/grub.cfg; \
+		echo '}' >> $(RELEASE_DIR)/boot/grub/grub.cfg; \
+		echo "AMD64 files ready: boot/kernel.elf, boot/disk.img"; \
+		mkdir -p $(RELEASE_DIR)/iso/boot/grub; \
+		cp -r $(RELEASE_DIR)/boot/* $(RELEASE_DIR)/iso/boot/; \
+		GRUB_MKRESCUE=""; \
+		for c in i686-elf-grub-mkrescue grub-mkrescue; do \
+			if command -v $$c >/dev/null 2>&1; then GRUB_MKRESCUE=$$c; break; fi; \
+		done; \
+		if [ -z "$$GRUB_MKRESCUE" ]; then echo "Errore: grub-mkrescue non trovato"; exit 1; fi; \
+		echo "-> Creo ISO con $$GRUB_MKRESCUE..."; \
+		$$GRUB_MKRESCUE -o $(RELEASE_DIR)/os1test-amd64-$(VERSION).iso $(RELEASE_DIR)/iso; \
+		echo "-> Rimuovo MBR hybrid per renderla leggibile da macOS..."; \
+		dd if=/dev/zero of=$(RELEASE_DIR)/os1test-amd64-$(VERSION).iso bs=512 count=1 conv=notrunc 2>/dev/null; \
+		echo "ISO creata: $(RELEASE_DIR)/os1test-amd64-$(VERSION).iso"; \
+	else \
+		cp $(KERNEL_BIN) $(RELEASE_DIR)/kernel.img; \
+		cp $(DISK_IMG)   $(RELEASE_DIR)/disk.img; \
+		echo "AArch64 release: kernel.img + disk.img"; \
+	fi
 
 test-release: release-arch
 	@echo "Starting QEMU Release Test for $(ARCH) (Version: $(VERSION))..."
