@@ -1,0 +1,141 @@
+/* kernel/drivers/ps2/ps2.c */
+#include <arch/arch.h> // ← Questo include inb/outb
+#include <drivers/keyboard.h>
+#include <drivers/ps2.h>
+#include <drivers/virtio_input.h>
+#include <kernel/irq.h>
+#include <kernel/printk.h>
+
+#ifdef ARCH_AMD64
+
+/* The 8259 PIC remaps IRQ n -> IDT vector 32+n (pic_init).  irq_register(),
+ * irq_dispatch() and pic_chip_enable() all key on the VECTOR, not the bare
+ * IRQ line, so device IRQs must be registered as 32+line. */
+#define PIC_VECTOR_BASE 32
+
+static void ps2_wait_write(void) {
+  int timeout = 100000;
+  while ((inb(0x64) & 0x02) && timeout--)
+    ;
+  if (timeout <= 0)
+    pr_warn("PS/2: write timeout\n");
+}
+
+static void ps2_wait_read(void) {
+  int timeout = 100000;
+  while (!(inb(0x64) & 0x01) && timeout--)
+    ;
+  if (timeout <= 0)
+    pr_warn("PS/2: read timeout\n");
+}
+
+static uint8_t ps2_read_data(void) {
+  ps2_wait_read();
+  return inb(0x60);
+}
+
+static void ps2_write_cmd(uint8_t cmd) {
+  ps2_wait_write();
+  outb(0x64, cmd);
+}
+
+static void ps2_write_data(uint8_t data) {
+  ps2_wait_write();
+  outb(0x60, data);
+}
+
+/* ==================== KEYBOARD ==================== */
+static void ps2_keyboard_handler(uint32_t irq, void *data) {
+  (void)irq;
+  (void)data;
+  uint8_t scancode = inb(0x60);
+
+  uint16_t code = scancode & 0x7F;
+  int pressed = (scancode & 0x80) == 0;
+
+  virtio_input_add_event(EV_KEY, code, pressed ? 1 : 0);
+  keyboard_notify_input();
+}
+
+/* ==================== MOUSE ==================== */
+static uint8_t mouse_packet[4];
+static int mouse_byte = 0;
+static int mouse_has_wheel = 0;
+
+static void ps2_mouse_handler(uint32_t irq, void *data) {
+  (void)irq;
+  (void)data;
+
+  if (mouse_byte >= 4)
+    mouse_byte = 0;
+  mouse_packet[mouse_byte++] = inb(0x60);
+
+  if (mouse_byte == (mouse_has_wheel ? 4 : 3)) {
+    uint8_t status = mouse_packet[0];
+    int dx = (int8_t)mouse_packet[1];
+    int dy = -(int8_t)mouse_packet[2];
+
+    virtio_input_add_event(EV_KEY, BTN_LEFT, (status & 0x01));
+    virtio_input_add_event(EV_KEY, BTN_RIGHT, (status & 0x02));
+    virtio_input_add_event(EV_KEY, BTN_MIDDLE, (status & 0x04));
+
+    if (dx)
+      virtio_input_add_event(EV_REL, REL_X, dx);
+    if (dy)
+      virtio_input_add_event(EV_REL, REL_Y, dy);
+
+    if (mouse_has_wheel && mouse_packet[3] != 0) {
+      virtio_input_add_event(EV_REL, REL_WHEEL, (int8_t)mouse_packet[3]);
+    }
+
+    keyboard_notify_input();
+    mouse_byte = 0;
+  }
+}
+
+void ps2_init(void) {
+  pr_info("PS/2: Initializing controller...\n");
+
+  ps2_write_cmd(0xAD);
+  ps2_write_cmd(0xA7);
+
+  while (inb(0x64) & 1)
+    inb(0x60);
+
+  ps2_write_cmd(0x20);
+  uint8_t cmd = ps2_read_data() | 0x03;
+  ps2_write_cmd(0x60);
+  ps2_write_data(cmd);
+
+  ps2_write_cmd(0xAE);
+  ps2_write_cmd(0xA8);
+
+  ps2_write_data(0xF4);
+  ps2_read_data(); /* ACK */
+
+  /* IntelliMouse wheel */
+  ps2_write_data(0xF3);
+  ps2_write_data(200);
+  ps2_write_data(0xF3);
+  ps2_write_data(100);
+  ps2_write_data(0xF3);
+  ps2_write_data(80);
+  ps2_write_data(0xF2);
+  if (ps2_read_data() == 0x03) {
+    mouse_has_wheel = 1;
+    pr_info("PS/2: Mouse with scroll wheel detected\n");
+  }
+
+  /* Register keyboard (IRQ 1) at vector 33 and mouse (IRQ 12) at vector 44. */
+  irq_register(PIC_VECTOR_BASE + 1, ps2_keyboard_handler, NULL);
+  irq_register(PIC_VECTOR_BASE + 12, ps2_mouse_handler, NULL);
+
+  pr_info("PS/2: Keyboard + Mouse ready (IRQ 1/12 -> vec 33/44)\n");
+}
+
+#else
+
+/* Stub per AArch64 */
+void ps2_init(void) { /* Do nothing on AArch64 */ }
+
+#endif

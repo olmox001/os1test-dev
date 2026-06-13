@@ -23,6 +23,8 @@ extern void compositor_update_mouse(int dx, int dy, int absolute);
 #define MAX_INPUT_DEVS 2
 #define INPUT_QSIZE 16
 
+void virtio_input_add_event(uint16_t type, uint16_t code, int32_t value);
+
 struct virtio_input_dev {
   virtio_handle_t handle;
   uint32_t irq;
@@ -52,8 +54,7 @@ static void virtio_input_handler(uint32_t irq, void *data);
 #define v_write32(dev, off, val) virtio_write_reg((dev)->handle, (off), (val))
 #define v_notify(dev, q) virtio_notify((dev)->handle, (q))
 
-static void virtio_input_add_event(uint16_t type, uint16_t code,
-                                   int32_t value) {
+void virtio_input_add_event(uint16_t type, uint16_t code, int32_t value) {
   uint32_t next = (input_head + 1) % INPUT_BUFFER_SIZE;
   if (next == input_tail) {
     input_tail = (input_tail + 1) % INPUT_BUFFER_SIZE;
@@ -210,6 +211,7 @@ static void virtio_input_handler(uint32_t irq, void *data) {
 
 void virtio_input_init(void) {
   pr_info("%s", "VirtIO-Input: Probing devices...\n");
+  input_dev_count = 0; // reset
 
   int count = arch_virtio_get_count(VIRTIO_DEV_INPUT);
   for (int i = 0; i < count; i++) {
@@ -219,7 +221,12 @@ void virtio_input_init(void) {
       init_device(dev, irq, 0);
     }
   }
+
+  if (input_dev_count > 0) {
+    pr_info("VirtIO-Input: %d input device(s) initialized\n", input_dev_count);
+  }
 }
+int virtio_input_get_dev_count(void) { return input_dev_count; }
 
 int virtio_input_poll(struct virtio_input_event *event) {
   if (input_head == input_tail)

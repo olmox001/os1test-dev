@@ -5,11 +5,12 @@
  * Translates scancodes to ASCII and provides buffered input
  */
 #include <drivers/keyboard.h>
+#include <drivers/ps2.h>
 #include <drivers/virtio_input.h>
 #include <kernel/printk.h>
 #include <kernel/sched.h>
-#include <kernel/types.h>
 #include <kernel/string.h>
+#include <kernel/types.h>
 #include <posix_types.h>
 
 /* Keyboard state */
@@ -18,14 +19,14 @@ static int ctrl_pressed = 0;
 static int caps_lock = 0;
 
 typedef struct {
-    const char* name;
-    const char* ascii_map;
-    const char* shifted_map;
-    struct {
-        uint16_t code;
-        int shifted;
-        const char* utf8;
-    } utf8_overrides[16];
+  const char *name;
+  const char *ascii_map;
+  const char *shifted_map;
+  struct {
+    uint16_t code;
+    int shifted;
+    const char *utf8;
+  } utf8_overrides[16];
 } keyboard_layout_t;
 
 static const keyboard_layout_t layout_us = {
@@ -35,20 +36,16 @@ static const keyboard_layout_t layout_us = {
 
 static const keyboard_layout_t layout_it = {
     .name = "it",
-    .utf8_overrides = {
-        {40, 0, "\xC3\xA0"}, // à
-        {40, 1, "\xC3\x80"}, // À
-        {26, 0, "\xC3\xA8"}, // è
-        {26, 1, "\xC3\xA9"}, // é
-        {39, 0, "\xC3\xB2"}, // ò
-        {41, 0, "\xC3\xB9"}, // ù
-        {43, 0, "\xC3\xAC"}, // ì
-        {0, 0, NULL}
-    }
-};
+    .utf8_overrides = {{40, 0, "\xC3\xA0"}, // à
+                       {40, 1, "\xC3\x80"}, // À
+                       {26, 0, "\xC3\xA8"}, // è
+                       {26, 1, "\xC3\xA9"}, // é
+                       {39, 0, "\xC3\xB2"}, // ò
+                       {41, 0, "\xC3\xB9"}, // ù
+                       {43, 0, "\xC3\xAC"}, // ì
+                       {0, 0, NULL}}};
 
 static const keyboard_layout_t *current_layout = &layout_us;
-
 
 /* Scancode to ASCII table (US layout) */
 static const char scancode_to_ascii[128] = {
@@ -98,12 +95,24 @@ void keyboard_init(void) {
   ctrl_pressed = 0;
   caps_lock = 0;
 
-  /* Initialize VirtIO Input driver */
+  pr_info("%s", "Input: Initializing input subsystem...\n");
+
   virtio_input_init();
 
-  /* Load layout from registry */
-  /* TODO: kernel_registry_get needs to be accessible here */
-  /* For now, default to IT if requested by user */
+  /* Rilevamento automatico + supporto architetture */
+#ifdef ARCH_AMD64
+  if (virtio_input_get_dev_count() == 0) {
+    pr_info("Input: No VirtIO input → enabling PS/2 fallback\n");
+    ps2_init();
+  } else {
+    pr_info("Input: VirtIO detected (%d) + PS/2 support\n",
+            virtio_input_get_dev_count());
+    ps2_init(); // Ibrido: meglio avere entrambi su QEMU amd64
+  }
+#else
+  pr_info("%s", "Input: VirtIO only (AArch64 - PS/2 not available)\n");
+#endif
+
   current_layout = &layout_it;
 
   INIT_LIST_HEAD(&keyboard_wait_queue.task_list);
@@ -204,7 +213,7 @@ static void keyboard_process_key(uint16_t code, int32_t value) {
     msg.type = IPC_TYPE_INPUT;
     msg.data1 = ((uint64_t)code << 16) | (uint8_t)c;
     msg.data2 = (uint64_t)value; /* 0=release, 1=press, 2=repeat */
-    
+
     /* UTF-8 Handling */
     if (c != 0) {
       msg.payload[0] = c;
@@ -213,13 +222,15 @@ static void keyboard_process_key(uint16_t code, int32_t value) {
 
     /* Apply Layout Overrides */
     if (value != 0 && current_layout) {
-        for (int i = 0; i < 16 && current_layout->utf8_overrides[i].utf8 != NULL; i++) {
-            if (current_layout->utf8_overrides[i].code == code && 
-                current_layout->utf8_overrides[i].shifted == shift_pressed) {
-                strlcpy(msg.payload, current_layout->utf8_overrides[i].utf8, sizeof(msg.payload));
-                break;
-            }
+      for (int i = 0; i < 16 && current_layout->utf8_overrides[i].utf8 != NULL;
+           i++) {
+        if (current_layout->utf8_overrides[i].code == code &&
+            current_layout->utf8_overrides[i].shifted == shift_pressed) {
+          strlcpy(msg.payload, current_layout->utf8_overrides[i].utf8,
+                  sizeof(msg.payload));
+          break;
         }
+      }
     }
 
     kernel_ipc_send(keyboard_focus_pid, &msg);

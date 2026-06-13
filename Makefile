@@ -198,7 +198,8 @@ KERN_C_SOURCES += \
     $(KERNEL_DIR)/graphics/compositor.c \
     $(KERNEL_DIR)/irq/irq.c \
     $(KERNEL_DIR)/lib/fdt.c \
-    $(KERNEL_DIR)/main.c
+    $(KERNEL_DIR)/main.c \
+    $(KERNEL_DIR)/drivers/ps2/ps2.c
 
 KERN_CPP_SOURCES = \
     $(KERNEL_DIR)/drivers/cpp_test.cpp
@@ -257,6 +258,7 @@ dirs:
 	@mkdir -p $(BUILD_DIR)/$(USER_DIR)/bin
 	@mkdir -p $(BUILD_DIR)/$(USER_ARCH_DIR)
 	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/drivers/block
+	@mkdir -p $(BUILD_DIR)/$(KERNEL_DIR)/drivers/ps2
 # Bootloader
 bootloader: $(BOOTLOADER_BIN)
 
