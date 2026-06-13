@@ -138,9 +138,11 @@ first-fit allocator with forward coalescing on top of `sbrk`.
 
 ## 6. Processes, scheduling & IPC
 
-`kernel/sched/process.c`. Fixed pool of `MAX_PROCESSES` (64). Each `struct process` holds
-its PID (monotonic, never reused), page table, kernel stack, saved `pt_regs` context, CWD,
-priority, and an IPC message queue.
+`kernel/sched/process.c`. Pool array of `MAX_PROCESSES` (128); the effective live limit is
+**derived from usable memory** at boot (anti fork-bomb, SCHED-DOS-01). Each `struct process`
+holds its PID (monotonic, never reused), page table, kernel stack, saved `pt_regs` context,
+CWD, priority, an IPC message queue, a per-process **fd table**, a privilege **level** and a
+**capability mask**.
 
 - **Scheduler:** per-CPU priority run-queues with an `O(1)` bitmap pick and **work-stealing**
   across CPUs; 100 Hz preemption. (It also consults the compositor for focus-based boosting —
@@ -149,13 +151,24 @@ priority, and an IPC message queue.
   (zombie → **auto-reaped by the scheduler**; `process_wait` is a non-blocking pure
   reporter, `-2` = child gone). Teardown frees user frames + private tables (leak-free).
   Each process records its `parent_pid`; `kill` is capability-checked
-  (self/children/SYSTEM).
+  (self or any **descendant**; privileged levels kill anything). A dead
+  parent's children are reparented to the nearest live ancestor (SCHED-DOS-02).
+- **Privilege & capabilities (USR-SEC-03 #79):** one of four levels —
+  `machine` (the machine's own identity: not a login user, unkillable,
+  bypasses all checks, resolver for future real users) > `root` > `user` >
+  `guest` — plus a fine-grained capability mask (`CAP_SPAWN/FS_WRITE/IPC_ANY/
+  WINDOW/REG_WRITE`, shared kernel↔userland in `include/api/caps.h`). Spawn is
+  monotonic: a child is never more privileged than its creator, never above
+  its level's ceiling, never beyond the creator's caps. `spawn_caps`/
+  `spawn_level` request a restricted child; plain `spawn` yields a full `user`.
 - **ELF loading (`elf.c`):** maps each `PT_LOAD` segment (with a user-window guard on
   `p_vaddr`), a 1 MB stack at `0xC0000000`, sets the entry point. `sbrk` is capped below
   the stack.
 - **IPC:** `kernel_ipc_send` copies a message into the target's queue and wakes it;
-  `sys_ipc_recv` pops or sleeps. (Has a lost-wakeup race and unbounded queue — IPC-01,
-  SCHED-05; the formal authenticated IPC API is the open B3 item.)
+  `sys_ipc_recv` pops or sleeps (the lost-wakeup race is fixed, IPC-01: recv re-checks the
+  queue under `msg_lock` before sleeping). `msg.from` is kernel-stamped (sender auth);
+  without `CAP_IPC_ANY` a process may only message its parent or descendants. The queue is
+  still unbounded (SCHED-05/per-queue quota → B5/B6).
 
 ## 7. Syscall ABI reference
 
@@ -168,33 +181,39 @@ return **negative errno** (`-EPERM`, `-EFAULT`, …; codes in `include/api/posix
 
 | # | Name | Wrapper | Notes |
 |---|---|---|---|
-| 63 | READ | `read(fd,buf,n)` | fd 0 = stdin (keyboard IPC); blocks |
-| 64 | WRITE | `write(fd,buf,n)` | fd 1/2 → window-by-pid; fd≥100 → window id; **truncates >1023 B**, also echoes UART |
+| 56/57/62 | OPEN/CLOSE/LSEEK | `open/close/lseek` | per-process fd table (ABI-03); open-for-write needs CAP_FS_WRITE |
+| 63 | READ | `read(fd,buf,n)` | fd 0 = stdin (keyboard IPC); fd≥3 = file at private offset; blocks |
+| 64 | WRITE | `write(fd,buf,n)` | fd 1/2 = stdout (own window, **inherited from the spawner's terminal**); fd≥3 = file; no truncation, also echoes UART |
 | 93 | EXIT | `exit(status)` | |
 | 169 | GET_TIME | `get_time()` | ms (from a stubbed timer on amd64) |
 | 172 | GETPID | `get_pid()` | |
 | 200 | DRAW | `draw(x,y,w,h,color)` | raw framebuffer rect |
 | 201 | FLUSH | `flush()` | compositor render |
 | 210 | CREATE_WINDOW | `create_window(x,y,w,h,title)` | |
-| 211–215 | WINDOW_DRAW/RENDER/BLIT/SET_FLAGS/DESTROY | `window_*` | DESTROY is **owner-only** |
+| 211–215 | WINDOW_DRAW/RENDER/BLIT/SET_FLAGS/DESTROY | `window_*` | DESTROY is **owner-only**; draw/focus need CAP_WINDOW |
+| 217 | WINDOW_WRITE | `window_write(id,buf,n)` | write text to a window by id (needs CAP_WINDOW); replaces the old fd≥100 overload |
 | 216 | SBRK | `sbrk(incr)` | heap grow/shrink; capped below the user stack |
-| 220 | SPAWN | `spawn(path)` | loads+runs an ELF; records `parent_pid` |
-| 221 | KILL | `kill_process(pid)` | **capability-checked**: self/children/SYSTEM |
+| 220 | SPAWN | `spawn(path)` | full `user` child; needs CAP_SPAWN; records `parent_pid` |
+| 234 | SPAWN_CAPS | `spawn_caps/spawn_level` | restricted spawn (level+caps), monotonically clamped |
+| 221 | KILL | `kill_process(pid)` | **capability-checked**: self or any **descendant**; privileged kills anything |
 | 222 | GETPROCS | `get_procs(buf,n)` | `struct ps_info[]` |
 | 223 | YIELD | `yield()` | |
-| 230/231 | SEND/RECV | `send/recv(pid,msg)` | blocking; single numbering (old 30/31/32 aliases removed) |
-| 232 | SET_FOCUS | `set_focus(pid)` | self-only (or SYSTEM) |
+| 230/231 | SEND/RECV | `send/recv(pid,msg)` | blocking; SEND needs CAP_IPC_ANY for non-relatives; `msg.from` kernel-stamped |
+| 232 | SET_FOCUS | `set_focus(pid)` | needs CAP_WINDOW; cross-PID focus needs machine level |
 | 233 | TRY_RECV | `try_recv(&msg)` | non-blocking; `-EAGAIN` when empty |
 | 247 | WAIT | `wait(pid)` | non-blocking: pid if dead, -1 alive, -2 gone |
-| 250 | REGISTRY | `registry_read/write` | K/V store; **first-writer-wins key ownership** |
-| 251/252 | FILE_WRITE/READ | `file_write/read(path,...)` | via VFS; `/bin` `/sys` write-protected for non-SYSTEM |
+| 250 | REGISTRY | `registry_read/write` | K/V store; write needs CAP_REG_WRITE; **first-writer-wins key ownership** |
+| 251/252 | FILE_WRITE/READ | `file_write/read(path,...)` | via VFS; write needs CAP_FS_WRITE; `/bin` `/sys` machine-only |
 | 253 | SET_FONT | `set_font(data,size)` | **passes a raw user pointer to the kernel** (GFX-FONT-01) |
 | 254 | LIST_DIR | `list_dir(path,buf,size)` | |
 | 255/256 | CHDIR/GETCWD | `chdir/getcwd` | |
 
-> Numbering, errno and the first capability layer landed with epic #93 (B3). Still open:
-> a real per-process **fd table** (fd is overloaded today — ABI-03 #90), the formal
-> authenticated IPC API, and sandboxing (USR-SEC-03 #79).
+> Epic #93 (B3) is **closed**: single numbering, negative errno, the per-process fd table
+> (ABI-03 #90), capability checks at every gated surface with a 4-level privilege model
+> (USR-SEC-03 #79), the IPC-01 lost-wakeup fix, and the userland legacy purge + stdout
+> inheritance (USR-TTY-01 #123). Still open elsewhere: the modern terminal protocol
+> (#123 problem 2, post-B3), per-window/per-IPC quotas (#122 residue, B5), SET_FONT
+> (GFX-FONT-01).
 
 ## 8. Drivers & the HAL
 
@@ -282,11 +301,10 @@ today and are prime candidates for extraction into userland services (epic #95).
 The authoritative, severity-ranked list is [`review/REVIEW.md`](review/REVIEW.md) and the
 GitHub issues (`code-review` label). Highlights (post B1/B2, mid-B3, 2026-06-12):
 
-- **amd64 RAM accounting** counts the 3–4 GB PCI hole as allocatable RAM (`-m 5G` reports
-  6144 MB); amd64 parity gaps (ACPI/MADT CPU count, FPU context, PCI init) — epic #94.
-- **No fd table**: fd is an overloaded integer (0=stdin, 1/2=window-by-pid, ≥100=window
-  id) — ABI-03 #90. **No sandboxing** yet (USR-SEC-03 #79); IPC has a lost-wakeup race
-  (IPC-01 #85) and no sender authentication.
+- **amd64 parity gaps** (ACPI/MADT CPU count, FPU context, PCI init) — epic #94. (The PCI-hole
+  RAM-accounting bug is fixed: MM-PMM-08 #117, `-m 5G` now reports 5119 MB usable / 6144 span.)
+- IPC queue is still **unbounded** (no per-queue quota; SCHED-05/#122 residue → B5/B6). The
+  modern terminal protocol (#123 problem 2) is post-B3.
 - **set_font** hands a raw user pointer to the kernel (UAF risk). *(W4)*
 - Several **SMP data races** remain in drivers/compositor (uaccess TOCTOU, lock-free
   shared state — see `area:drivers`/`area:graphics` issues).

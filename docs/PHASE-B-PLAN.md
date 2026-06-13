@@ -7,8 +7,9 @@
 > **Status (2026-06-12)**: Phase A is **100% complete**.  Phase B: **B1 DONE**
 > (VFS + ext4 extents + residuals), **B2 DONE** (epic #92 closed — W^X,
 > teardown, allocators, TLB shootdown, **higher-half kernel landed on both
-> arches**), **B3 IN PROGRESS** (epic #93 — numbering+errno and the first
-> capability layer landed; fd table #90, formal IPC, sandboxing #79 remain).
+> arches**), **B3 DONE** (epic #93 closed — numbering+errno, capabilities,
+> fd table #90, IPC-01 #85, the 4-level privilege/capability sandbox #79, and
+> the userland legacy purge #123 all landed).
 > All work lives on branch `comprehensive-review` (pushed to origin); the
 > maintainer merges to `main` himself.
 
@@ -187,7 +188,7 @@ W2-class refinements (AMMU-04..07, MM-KM-02..06, MM-PMM-03..06,
 MM-BUF-02..05) remain open under the epic.  HAL isolation held: zero
 `platform.c` edits (amd64).
 
-### B3 — Epic #93: coherent ABI + capabilities — **IN PROGRESS (2026-06-12)**
+### B3 — Epic #93: coherent ABI + capabilities — **DONE (2026-06-13)**
 **Batch 1 (`0bef4c3`)**: single syscall numbering in
 `include/api/syscall_nums.h` shared by kernel switch + userland .S stubs
 (ABI-01 #88, ABI-SYS-01 #75; duplicate IPC 30/31/32 removed, TRY_RECV→233,
@@ -221,8 +222,29 @@ plus an aarch64-specific arg clobber (return written into x0 = arg0
 after the armed syscall retry → recv re-ran with src_pid=0 and slept
 unwakeable; `IPC_RECV_RETRY` sentinel keeps the frame untouched).
 Sender auth was already in place (`msg.from` kernel-stamped).
-**Remaining**: sandboxing (USR-SEC-03 #79 — epic-level outcome, needs
-maintainer direction); SCHED-05 AB-BA lock chain stays slotted in B6.
+**Batch 6 (`24fab00`)**: sandboxing primitive (USR-SEC-03 #79) — the flat
+3-bit `PROC_PERM_*` becomes a privilege **LEVEL** (machine/root/user/guest)
+plus a fine-grained **CAP_*** mask (SPAWN/FS_WRITE/IPC_ANY/WINDOW/REG_WRITE),
+shared kernel↔userland in `include/api/caps.h`.  `process_create_caps` does
+the monotonic cut (never more privileged than the creator, never above the
+level ceiling, never more than the creator holds — escalation impossible by
+construction); machine bypasses and is unkillable; it is the resolver for the
+future multi-user model.  Caps gate spawn/window/focus/file-write/registry-
+write and non-relative IPC (`process_ipc_allowed`).  New `SYS_SPAWN_CAPS`=234
++ `spawn_caps`/`spawn_level`; plain `spawn` still yields a full user (no
+break).  `/bin/sandboxtest`+`sandboxchild` prove the guest denials and that
+the guest ceiling clamped a CAP_ALL request to CAP_WINDOW.
+**Batch 7 (`02f7e3b`)**: userland legacy purge + stdout inheritance
+(USR-TTY-01 #123 problem 1) — removed the `fd>=100` write overload
+(→ `SYS_WINDOW_WRITE`=217 + `window_write()`; `printf_win` and all callers,
+incl. the maintainer's forkbomb/top, migrated), removed the 1023-byte
+window-write truncation (shared `window_text_write` bounce, retires ABI-06 on
+the window path), and made a child inherit its spawner's stdout window so a
+shell-launched program prints in the shell terminal instead of UART-only.
+Deleted the stale `user/sys/lib/syscall.S`.  The modern terminal protocol
+(#123 problem 2) stays post-B3.
+**Closed**: epic #93 fully done; SCHED-05 AB-BA lock chain stays slotted in
+B6; per-window/per-IPC quotas (#122 residue) stay in B5.
 
 ### B4 — Epic #94: amd64 parity (ACPI-MADT CPU count ARCH-01, real
 PCI/ACPI init ARCH-02, FPU/XMM save on context switch CPU-AMD64-01,
