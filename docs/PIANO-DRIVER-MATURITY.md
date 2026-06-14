@@ -14,7 +14,14 @@
   timeout` perché [ps2.c:112](../kernel/drivers/ps2/ps2.c) aveva un flush loop
   illimitato (`while (inb(0x64) & 1) inb(0x60);`) — senza 8042 il bus legge `0xFF`,
   bit0 sempre 1 → hang. Reso non-bloccante: presence-gate `0xFF`, self-test `0xAA→0x55`,
-  loop limitato, wait con stato.
+  loop limitato, wait con stato. (commit `1a3acc4`, issue #124)
+- **Puntatore assoluto (DRV-INPUT-01 #125)**: su UTM il cursore (relativo, sia USB che PS/2)
+  si inchioda al bordo destro — desync host-assoluto-senza-grab. Introdotto il contratto
+  `EV_ABS` normalizzato `[0, INPUT_ABS_MAX]` + scaling→pixel nel compositor + fix del clobber
+  d'asse (la sentinella `-1` ora è onorata). **virtio-tablet verificato su QEMU** (scaling
+  matematicamente corretto: x=0x7FFF→719, x=0x4000→359, niente azzeramento d'asse).
+  **Follow-up**: USB-HID assoluto (report-protocol) per il tablet USB di UTM (oggi il path USB
+  HID è solo boot-mouse relativo).
 
 ## 1. Decisioni del maintainer (vincolanti)
 
