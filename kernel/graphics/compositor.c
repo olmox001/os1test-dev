@@ -605,7 +605,7 @@ static void term_draw_cursor(int win_id, struct window *win,
   if (cx < 0 || cy < 0 || cx >= win->grid_cols || cy >= win->grid_rows)
     return;
 
-  const uint32_t caret = 0xC000FF88; /* ARGB: 75% alpha (25% transparent) */
+  const uint32_t caret = 0x4000FF88; /* ARGB: 25% alpha (25% opaque), shell green */
   int px0 = cx * char_w, py0 = cy * char_h;
   for (int y = 0; y < char_h; y++) {
     int sy = py0 + y;

@@ -670,8 +670,14 @@ struct process *process_create_caps(const char *name, uint8_t priority,
   spin_lock_init(&proc->msg_lock);
   spin_lock_init(&proc->mm_lock);
 
-  /* Filesystem Init */
-  strncpy(proc->cwd, "/", sizeof(proc->cwd));
+  /* Filesystem Init: a child inherits the spawner's working directory
+   * (POSIX), so `kilo init.cfg` launched from /etc opens /etc/init.cfg and not
+   * /init.cfg.  Kernel/boot creations (no creator) start at "/". */
+  if (creator && creator->cwd[0])
+    strncpy(proc->cwd, creator->cwd, sizeof(proc->cwd));
+  else
+    strncpy(proc->cwd, "/", sizeof(proc->cwd));
+  proc->cwd[sizeof(proc->cwd) - 1] = '\0';
   process_fd_init(proc);
 
   /* Add to pool */
