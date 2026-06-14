@@ -313,8 +313,9 @@ lock (GFX-COMP-02). These are scheduled for Fase 3/Fase 5.
    declare a `struct device_driver` (match by vendor:device or PCI class) and call
    `driver_register()` so the device manager binds it automatically.
 2. Register an IRQ handler with `irq_register`; add the source file to the `Makefile`
-   `KERN_C_SOURCES`. Keep bring-up **non-blocking** — bounded waits, graceful skip when the
-   hardware is absent (see `drivers/ps2/ps2.c`).
+   `KERN_C_SOURCES`. Keep bring-up **non-blocking**: never spin on a status bit unbounded —
+   use `poll_until`/`spin_until` (`kernel/io_poll.h`) so an absent/wedged device degrades
+   gracefully instead of hanging the boot (see `drivers/ps2/ps2.c`).
 
 ## 13. Logging & diagnostics
 

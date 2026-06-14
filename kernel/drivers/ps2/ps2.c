@@ -3,6 +3,7 @@
 #include <drivers/keyboard.h>
 #include <drivers/ps2.h>
 #include <drivers/virtio_input.h>
+#include <kernel/io_poll.h>
 #include <kernel/irq.h>
 #include <kernel/printk.h>
 
@@ -17,17 +18,15 @@
  * whole point: on a board without an 8042 the status port floats high, so a
  * naive wait would never progress. Bring-up must degrade, never block. */
 static int ps2_wait_write(void) {
-  for (int t = 100000; t > 0; t--)
-    if (!(inb(0x64) & 0x02))
-      return 0;
-  return -1;
+  int ok;
+  poll_until(ok, !(inb(0x64) & 0x02), 100000);
+  return ok ? 0 : -1;
 }
 
 static int ps2_wait_read(void) {
-  for (int t = 100000; t > 0; t--)
-    if (inb(0x64) & 0x01)
-      return 0;
-  return -1;
+  int ok;
+  poll_until(ok, inb(0x64) & 0x01, 100000);
+  return ok ? 0 : -1;
 }
 
 /* Returns 0 and stores the byte on success, -1 on timeout (leaves *out). */

@@ -65,9 +65,14 @@
   input unificato, ECAM aarch64, ramdisk) + nota render/bug-di-disegno (`docs/review/analysis/06-graphics.md`,
   #118) + nota "IPC completo su entrambe le arch"; `docs/review/HANDOFF.md`. Test: boot amd64
   con PS/2 (regressione) + matrice. Issue: aprire "PS/2 bring-up bloccante se controller assente".
-- **Fase 1 — Errori non-bloccanti generalizzati + hardening driver**: convenzione stato/errore +
-  helper bounded-wait (contratto kernel); audit/hardening busy-wait di bring-up (HCD USB
-  reset, virtio, pci); PS/2 salta se USB HID già attivo (`usb_hid_present()`).
+- **Fase 1 — Errori non-bloccanti generalizzati + hardening driver** *(FATTA)*: contratto
+  `kernel/io_poll.h` (`poll_until`/`spin_until`, macro do/while ISO `-Wpedantic`-safe). Audit
+  kernel-wide: gli HCD USB (xhci/ehci/uhci) erano **già** limitati (`for s<N`); bonificati i
+  wait TX UART (16550 + pl011) che erano illimitati e adottato il contratto in PS/2. **Nessun
+  wait hardware illimitato residuo** (verificato: 0 `while(1)`/`for(;;)`, 0 spin su registro
+  senza cap). Boot OK entrambe le arch. **Rinviato** (valore basso — input duplicato raro — e
+  rischio comportamentale durante il test PS/2 del maintainer su UTM): `usb_hid_present()` +
+  skip PS/2 se USB HID attivo.
 - **Fase 2 — Plug-and-play: recognition + hotplug kernel + dispatch userland**: registro HAL
   mutabile a runtime (lock, `hal_register_device_dynamic`, `hal_unregister_device`, refcount,
   `device_driver.remove`, `driver_match_one`); eventi hotplug HCD USB → HAL → IPC verso
