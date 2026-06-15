@@ -50,6 +50,7 @@
 #define USB_DT_INTERFACE 0x04
 #define USB_DT_ENDPOINT  0x05
 #define USB_DT_HID       0x21
+#define USB_DT_HID_REPORT 0x22
 
 /* --- Class codes --- */
 #define USB_CLASS_HID 0x03
@@ -158,7 +159,15 @@ struct usb_device {
     uint8_t  hid_ep_in;       /* endpoint address (with 0x80 IN bit) */
     int      hid_ep_max;      /* wMaxPacketSize of that endpoint */
     uint8_t  hid_interval;
-    uint8_t  hid_protocol;    /* HID_PROTOCOL_KEYBOARD / _MOUSE */
+    uint8_t  hid_protocol;    /* HID_PROTOCOL_KEYBOARD / _MOUSE (boot) */
+    int      hid_use_report;  /* 1 = report-protocol HID (non-boot, e.g. tablet) */
+    /* Absolute pointer, parsed from the HID report descriptor (USB tablet). */
+    int      hid_is_abs;      /* 1 = reports absolute X/Y */
+    uint16_t hid_abs_x_off;   /* bit offset of X within the input report */
+    uint16_t hid_abs_y_off;   /* bit offset of Y */
+    uint8_t  hid_abs_bits;    /* X/Y field size in bits */
+    uint32_t hid_abs_max;     /* logical max of X/Y (for scaling) */
+    int16_t  hid_btn_off;     /* bit offset of the first button, -1 if none */
     int      in_use;
 };
 

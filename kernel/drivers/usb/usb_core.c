@@ -47,14 +47,15 @@ int usb_control(struct usb_device *dev, uint8_t bmRequestType, uint8_t bRequest,
 }
 
 /*
- * Parse the configuration descriptor block, locate a HID boot keyboard/mouse
- * interface and its interrupt-IN endpoint, and record them on the device.
- * Returns 1 if a usable HID interface was found.
+ * Parse the configuration descriptor block, locate a HID interface (boot
+ * keyboard/mouse, or a generic report-protocol HID such as a tablet) and its
+ * interrupt-IN endpoint, and record them on the device. Returns 1 if found.
  */
 static int usb_parse_hid(struct usb_device *dev, const uint8_t *cfg, int len) {
     int i = 0;
     int cur_iface = -1;
-    int cur_is_hid = 0;
+    int cur_is_hid = 0;   /* current interface is HID class */
+    int cur_is_boot = 0;  /* ... with the boot subclass + kbd/mouse protocol */
     uint8_t cur_proto = 0;
     while (i + 2 <= len) {
         uint8_t blen = cfg[i];
@@ -65,10 +66,11 @@ static int usb_parse_hid(struct usb_device *dev, const uint8_t *cfg, int len) {
             const struct usb_interface_descriptor *id =
                 (const struct usb_interface_descriptor *)(cfg + i);
             cur_iface = id->bInterfaceNumber;
-            cur_is_hid = (id->bInterfaceClass == USB_CLASS_HID &&
-                          id->bInterfaceSubClass == HID_SUBCLASS_BOOT &&
-                          (id->bInterfaceProtocol == HID_PROTOCOL_KEYBOARD ||
-                           id->bInterfaceProtocol == HID_PROTOCOL_MOUSE));
+            cur_is_hid = (id->bInterfaceClass == USB_CLASS_HID);
+            cur_is_boot = (cur_is_hid &&
+                           id->bInterfaceSubClass == HID_SUBCLASS_BOOT &&
+                           (id->bInterfaceProtocol == HID_PROTOCOL_KEYBOARD ||
+                            id->bInterfaceProtocol == HID_PROTOCOL_MOUSE));
             cur_proto = id->bInterfaceProtocol;
         } else if (btype == USB_DT_ENDPOINT && cur_is_hid && dev->hid_iface < 0 &&
                    blen >= sizeof(struct usb_endpoint_descriptor)) {
@@ -81,13 +83,83 @@ static int usb_parse_hid(struct usb_device *dev, const uint8_t *cfg, int len) {
                 dev->hid_ep_in = ed->bEndpointAddress;
                 dev->hid_ep_max = ed->wMaxPacketSize & 0x7FF;
                 dev->hid_interval = ed->bInterval;
-                dev->hid_protocol = cur_proto;
+                if (cur_is_boot)
+                    dev->hid_protocol = cur_proto;  /* boot kbd/mouse */
+                else
+                    dev->hid_use_report = 1;        /* needs report-descriptor parse */
                 return 1;
             }
         }
         i += blen;
     }
     return 0;
+}
+
+/*
+ * Minimal HID report-descriptor parser: walks the item stream tracking the
+ * running bit offset of the input report, recording the absolute X/Y fields
+ * (Generic Desktop usages 0x30/0x31) and the first button block. Enough to
+ * decode a standard USB tablet; sets dev->hid_is_abs on success. (Report IDs
+ * are not handled — QEMU's usb-tablet and typical tablets omit them.)
+ */
+static void usb_hid_parse_report_desc(struct usb_device *dev, const uint8_t *d, int len) {
+    uint32_t bit = 0, usage_page = 0, logical_max = 0;
+    uint32_t report_size = 0, report_count = 0;
+    uint16_t usages[8];
+    int nusage = 0;
+    dev->hid_btn_off = -1;
+
+    int i = 0;
+    while (i < len) {
+        uint8_t b = d[i++];
+        if (b == 0xFE) { /* long item: skip its payload */
+            if (i < len) { int dl = d[i]; i += 2 + dl; }
+            continue;
+        }
+        int isize = b & 0x03;
+        if (isize == 3) isize = 4;
+        uint8_t tag = b & 0xFC;
+        uint32_t val = 0;
+        for (int k = 0; k < isize && i < len; k++)
+            val |= (uint32_t)d[i++] << (8 * k);
+
+        switch (tag) {
+        case 0x04: usage_page = val; break;   /* Usage Page (global) */
+        case 0x24: logical_max = val; break;  /* Logical Maximum (global) */
+        case 0x74: report_size = val; break;  /* Report Size (global) */
+        case 0x94: report_count = val; break; /* Report Count (global) */
+        case 0x08:                            /* Usage (local) */
+            if (nusage < 8) usages[nusage++] = (uint16_t)val;
+            break;
+        case 0x80:                            /* Input (main) */
+            if (!(val & 0x01)) {              /* skip constant padding */
+                if (usage_page == 0x09 && dev->hid_btn_off < 0) {
+                    dev->hid_btn_off = (int16_t)bit;          /* first button bit */
+                } else if (usage_page == 0x01 && !(val & 0x04)) { /* absolute GD */
+                    for (uint32_t f = 0; f < report_count; f++) {
+                        uint16_t u = (f < (uint32_t)nusage) ? usages[f] : 0;
+                        uint32_t off = bit + f * report_size;
+                        if (u == 0x30) {                       /* X */
+                            dev->hid_abs_x_off = (uint16_t)off;
+                            dev->hid_abs_bits = (uint8_t)report_size;
+                            dev->hid_abs_max = logical_max;
+                            dev->hid_is_abs = 1;
+                        } else if (u == 0x31) {                /* Y */
+                            dev->hid_abs_y_off = (uint16_t)off;
+                        }
+                    }
+                }
+            }
+            bit += report_size * report_count;
+            nusage = 0;
+            break;
+        case 0x90: case 0xB0:                 /* Output/Feature: clear locals */
+        case 0xA0: case 0xC0:                 /* (End) Collection: clear locals */
+            nusage = 0;
+            break;
+        default: break;
+        }
+    }
 }
 
 static void usb_setup_device(struct usb_device *dev) {
@@ -144,23 +216,46 @@ static void usb_setup_device(struct usb_device *dev) {
     }
 
     if (!usb_parse_hid(dev, cfg, total)) {
-        return; /* not a HID boot device; ignored for now */
+        return; /* not a HID interrupt device; ignored */
     }
 
-    /* Put the interface into boot protocol and zero idle so reports only arrive
-     * on change, then open the interrupt endpoint and register for polling. */
-    usb_control(dev, USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
-                HID_REQ_SET_PROTOCOL, HID_PROTO_BOOT, dev->hid_iface, NULL, 0);
-    usb_control(dev, USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
-                HID_REQ_SET_IDLE, 0, dev->hid_iface, NULL, 0);
+    if (dev->hid_use_report) {
+        /* Report-protocol HID (e.g. a USB tablet): fetch + parse its report
+         * descriptor to locate absolute X/Y, then run it in report protocol. */
+        uint8_t rd[256];
+        memset(rd, 0, sizeof(rd));
+        int rl = usb_control(dev, USB_DIR_IN | USB_TYPE_STANDARD | USB_RECIP_INTERFACE,
+                             USB_REQ_GET_DESCRIPTOR, (USB_DT_HID_REPORT << 8),
+                             dev->hid_iface, rd, sizeof(rd));
+        if (rl > 0)
+            usb_hid_parse_report_desc(dev, rd, rl);
+        usb_control(dev, USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+                    HID_REQ_SET_PROTOCOL, HID_PROTO_REPORT, dev->hid_iface, NULL, 0);
+        usb_control(dev, USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+                    HID_REQ_SET_IDLE, 0, dev->hid_iface, NULL, 0);
+        if (!dev->hid_is_abs) {
+            pr_info("USB: HID report iface %d is not an absolute pointer; ignored\n",
+                    dev->hid_iface);
+            return;
+        }
+        pr_info("USB: HID tablet on iface %d ep 0x%02x (X@%u Y@%u %ubit max %u)\n",
+                dev->hid_iface, dev->hid_ep_in, (unsigned)dev->hid_abs_x_off,
+                (unsigned)dev->hid_abs_y_off, (unsigned)dev->hid_abs_bits,
+                (unsigned)dev->hid_abs_max);
+    } else {
+        /* Boot protocol kbd/mouse: zero idle so reports only arrive on change. */
+        usb_control(dev, USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+                    HID_REQ_SET_PROTOCOL, HID_PROTO_BOOT, dev->hid_iface, NULL, 0);
+        usb_control(dev, USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+                    HID_REQ_SET_IDLE, 0, dev->hid_iface, NULL, 0);
+        pr_info("USB: HID %s on iface %d ep 0x%02x (max %d)\n",
+                dev->hid_protocol == HID_PROTOCOL_KEYBOARD ? "keyboard" : "mouse",
+                dev->hid_iface, dev->hid_ep_in, dev->hid_ep_max);
+    }
 
     if (dev->hcd->ops->intr_open)
         dev->hcd->ops->intr_open(dev->hcd, dev, dev->hid_ep_in,
                                  dev->hid_ep_max, dev->hid_interval);
-
-    pr_info("USB: HID %s on iface %d ep 0x%02x (max %d)\n",
-            dev->hid_protocol == HID_PROTOCOL_KEYBOARD ? "keyboard" : "mouse",
-            dev->hid_iface, dev->hid_ep_in, dev->hid_ep_max);
 
     usb_hid_probe_device(dev);
 }

@@ -20,8 +20,14 @@
   `EV_ABS` normalizzato `[0, INPUT_ABS_MAX]` + scaling→pixel nel compositor + fix del clobber
   d'asse (la sentinella `-1` ora è onorata). **virtio-tablet verificato su QEMU** (scaling
   matematicamente corretto: x=0x7FFF→719, x=0x4000→359, niente azzeramento d'asse).
-  **Follow-up**: USB-HID assoluto (report-protocol) per il tablet USB di UTM (oggi il path USB
-  HID è solo boot-mouse relativo).
+  **FATTO**: USB-HID assoluto (report-protocol) — `usb_parse_hid` accetta HID non-boot, parser
+  del report descriptor (X/Y assoluti + bottoni), handler tablet → `EV_ABS` normalizzato.
+  Verificato su QEMU **xHCI (USB3) ed EHCI (USB2)** con `usb-tablet` (parse: X@8 Y@24 16bit max
+  32767; decodifica esatta). Controller-agnostico (vale anche UHCI).
+- **PS/2 mouse drift (DRV-INPUT-01 #125)**: l'handler non sincronizzava il pacchetto → stream
+  disallineato → `dx` leggeva il byte sbagliato → cursore trascinato di lato (anche con grab).
+  Fix: resync sul bit 3 dello status + drain a fine init + scarto pacchetti con overflow.
+  Verificato su QEMU (`sync=1`, dx esatto). Commit `5a68d45`.
 
 ## 1. Decisioni del maintainer (vincolanti)
 

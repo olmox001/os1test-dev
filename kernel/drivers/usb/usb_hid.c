@@ -116,6 +116,46 @@ static void hid_handle_mouse(struct hid_dev *h, const uint8_t *r, int len) {
     input_report(EV_SYN, 0, 0);
 }
 
+/* Extract `bits` (<=32) at bit offset `off` from a little-endian HID report. */
+static uint32_t hid_get_bits(const uint8_t *r, int len, uint32_t off, uint32_t bits) {
+    uint32_t v = 0;
+    for (uint32_t k = 0; k < bits && k < 32; k++) {
+        uint32_t bo = off + k;
+        if ((int)(bo >> 3) >= len) break;
+        if (r[bo >> 3] & (1u << (bo & 7)))
+            v |= (1u << k);
+    }
+    return v;
+}
+
+/*
+ * Absolute pointer (USB tablet): decode X/Y per the parsed report layout, scale
+ * to [0, INPUT_ABS_MAX] (the compositor maps that to framebuffer pixels) and emit
+ * EV_ABS — the same absolute path the compositor already handles. This is what
+ * makes a USB tablet track 1:1 instead of a relative mouse drifting to an edge.
+ */
+static void hid_handle_tablet(struct hid_dev *h, const uint8_t *r, int len) {
+    struct usb_device *dev = h->dev;
+    uint32_t bits = dev->hid_abs_bits ? dev->hid_abs_bits : 16;
+    uint32_t max = dev->hid_abs_max ? dev->hid_abs_max : ((1u << bits) - 1);
+    uint32_t x = hid_get_bits(r, len, dev->hid_abs_x_off, bits);
+    uint32_t y = hid_get_bits(r, len, dev->hid_abs_y_off, bits);
+    int32_t nx = (int32_t)((uint64_t)x * INPUT_ABS_MAX / max);
+    int32_t ny = (int32_t)((uint64_t)y * INPUT_ABS_MAX / max);
+
+    if (dev->hid_btn_off >= 0) {
+        uint8_t btn = (uint8_t)hid_get_bits(r, len, (uint32_t)dev->hid_btn_off, 3);
+        uint8_t changed = btn ^ h->prev[0];
+        if (changed & 0x01) input_report(EV_KEY, BTN_LEFT, btn & 0x01);
+        if (changed & 0x02) input_report(EV_KEY, BTN_RIGHT, (btn >> 1) & 1);
+        if (changed & 0x04) input_report(EV_KEY, BTN_MIDDLE, (btn >> 2) & 1);
+        h->prev[0] = btn;
+    }
+    input_report(EV_ABS, ABS_X, nx);
+    input_report(EV_ABS, ABS_Y, ny);
+    input_report(EV_SYN, 0, 0);
+}
+
 void usb_hid_poll(void) {
     uint8_t report[64];
     for (int i = 0; i < MAX_HID_DEVICES; i++) {
@@ -127,7 +167,9 @@ void usb_hid_poll(void) {
         int n = dev->hcd->ops->intr_poll(dev->hcd, dev, dev->hid_ep_in,
                                          report, sizeof(report));
         while (n > 0) {
-            if (dev->hid_protocol == HID_PROTOCOL_KEYBOARD)
+            if (dev->hid_is_abs)
+                hid_handle_tablet(h, report, n);
+            else if (dev->hid_protocol == HID_PROTOCOL_KEYBOARD)
                 hid_handle_keyboard(h, report, n);
             else
                 hid_handle_mouse(h, report, n);
