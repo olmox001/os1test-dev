@@ -85,31 +85,39 @@ static void ps2_mouse_handler(uint32_t irq, void *data) {
   (void)irq;
   (void)data;
 
-  if (mouse_byte >= 4)
-    mouse_byte = 0;
-  mouse_packet[mouse_byte++] = inb(0x60);
+  uint8_t byte = inb(0x60);
 
-  if (mouse_byte == (mouse_has_wheel ? 4 : 3)) {
-    uint8_t status = mouse_packet[0];
+  /* Packet resync: packet[0] (status) always has bit 3 set. If the byte we
+   * expect as the first one doesn't, the stream is misaligned (a leftover init
+   * byte or a missed IRQ) — drop it instead of reading dx/dy from the wrong
+   * bytes, which biases motion and drags the cursor sideways forever. */
+  if (mouse_byte == 0 && !(byte & 0x08))
+    return;
+
+  mouse_packet[mouse_byte++] = byte;
+  if (mouse_byte < (mouse_has_wheel ? 4 : 3))
+    return;
+  mouse_byte = 0;
+
+  uint8_t status = mouse_packet[0];
+
+  input_report(EV_KEY, BTN_LEFT, (status & 0x01) ? 1 : 0);
+  input_report(EV_KEY, BTN_RIGHT, (status & 0x02) ? 1 : 0);
+  input_report(EV_KEY, BTN_MIDDLE, (status & 0x04) ? 1 : 0);
+
+  /* Skip motion when the device flags an X/Y overflow — the deltas are bogus. */
+  if (!(status & 0xC0)) {
     int dx = (int8_t)mouse_packet[1];
     int dy = -(int8_t)mouse_packet[2];
-
-    input_report(EV_KEY, BTN_LEFT, (status & 0x01) ? 1 : 0);
-    input_report(EV_KEY, BTN_RIGHT, (status & 0x02) ? 1 : 0);
-    input_report(EV_KEY, BTN_MIDDLE, (status & 0x04) ? 1 : 0);
-
     if (dx)
       input_report(EV_REL, REL_X, dx);
     if (dy)
       input_report(EV_REL, REL_Y, dy);
-
-    if (mouse_has_wheel && mouse_packet[3] != 0) {
+    if (mouse_has_wheel && mouse_packet[3] != 0)
       input_report(EV_REL, REL_WHEEL, (int8_t)mouse_packet[3]);
-    }
-
-    input_report(EV_SYN, 0, 0);
-    mouse_byte = 0;
   }
+
+  input_report(EV_SYN, 0, 0);
 }
 
 void ps2_init(void) {
@@ -171,6 +179,11 @@ void ps2_init(void) {
     mouse_has_wheel = 1;
     pr_info("%s", "PS/2: Mouse with scroll wheel detected\n");
   }
+
+  /* Drain bytes the mouse queued while we were configuring it so the IRQ handler
+   * starts on a packet boundary (the handler also resyncs on the status bit). */
+  for (int i = 0; i < 16 && (inb(0x64) & 0x01); i++)
+    (void)inb(0x60);
 
   /* Register keyboard (IRQ 1) at vector 33 and mouse (IRQ 12) at vector 44. */
   irq_register(PIC_VECTOR_BASE + 1, ps2_keyboard_handler, NULL);
